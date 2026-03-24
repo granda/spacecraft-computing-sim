@@ -24,6 +24,8 @@ extern uint32_t _ebss;    /* End of .bss */
 extern int main(void);
 __attribute__((noreturn)) void Reset_Handler(void);
 __attribute__((noreturn)) void Default_Handler(void);
+/* Weak: overridden by main.c if SysTick is used */
+__attribute__((weak)) void SysTick_Handler(void) { Default_Handler(); }
 
 /*
  * Vector table: an array of function pointers.
@@ -48,7 +50,7 @@ const uint32_t vector_table[] = {
     (uint32_t)(uintptr_t)Default_Handler,   /* DebugMonitor */
     0,                                       /* Reserved */
     (uint32_t)(uintptr_t)Default_Handler,   /* PendSV */
-    (uint32_t)(uintptr_t)Default_Handler,   /* SysTick */
+    (uint32_t)(uintptr_t)SysTick_Handler,   /* SysTick */
     /* Device-specific IRQs (MPS2-AN385 / CMSDK) */
     (uint32_t)(uintptr_t)Default_Handler,   /* IRQ 0:  UART0 RX */
     (uint32_t)(uintptr_t)Default_Handler,   /* IRQ 1:  UART0 TX */

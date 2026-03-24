@@ -11,7 +11,7 @@ No physical hardware required.
 Set up an ARM cross-compilation environment and write bare-metal C targeting an emulated Cortex-M3 (MPS2-AN385). Software talks directly to hardware registers without an OS.
 
 - [x] UART output via memory-mapped I/O
-- [ ] Interrupt handlers (SysTick timer)
+- [x] Interrupt handlers (SysTick timer)
 - [ ] GPIO simulation
 
 [Phase 1 code and docs](phase1/)

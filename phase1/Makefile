@@ -21,14 +21,30 @@ run: $(BUILD)/firmware.elf
 
 test: $(BUILD)/firmware.elf
 	@echo "Running QEMU integration tests..."
-	@OUTPUT=$$($(TIMEOUT_CMD) 3 $(QEMU) $(QEMU_FLAGS) -kernel $< 2>&1); \
+	@OUTPUT=$$($(TIMEOUT_CMD) 10 $(QEMU) $(QEMU_FLAGS) -kernel $< 2>&1); \
 	PASS=0; FAIL=0; \
-	echo "$$OUTPUT" | grep -q "Hello from bare-metal Cortex-M3!" \
-		&& { echo "  PASS: boot message"; PASS=$$((PASS+1)); } \
-		|| { echo "  FAIL: boot message"; FAIL=$$((FAIL+1)); }; \
-	echo "$$OUTPUT" | grep -q "No OS. No standard library. Just registers." \
-		&& { echo "  PASS: second line"; PASS=$$((PASS+1)); } \
-		|| { echo "  FAIL: second line"; FAIL=$$((FAIL+1)); }; \
+	echo "$$OUTPUT" | grep -q "SysTick interrupt demo" \
+		&& { echo "  PASS: boot banner"; PASS=$$((PASS+1)); } \
+		|| { echo "  FAIL: boot banner"; FAIL=$$((FAIL+1)); }; \
+	echo "$$OUTPUT" | grep -q "tick 1" \
+		&& { echo "  PASS: first tick"; PASS=$$((PASS+1)); } \
+		|| { echo "  FAIL: first tick"; FAIL=$$((FAIL+1)); }; \
+	echo "$$OUTPUT" | grep -q "tick 5" \
+		&& { echo "  PASS: mid tick"; PASS=$$((PASS+1)); } \
+		|| { echo "  FAIL: mid tick"; FAIL=$$((FAIL+1)); }; \
+	echo "$$OUTPUT" | grep -q "tick 10" \
+		&& { echo "  PASS: final tick"; PASS=$$((PASS+1)); } \
+		|| { echo "  FAIL: final tick"; FAIL=$$((FAIL+1)); }; \
+	echo "$$OUTPUT" | grep -q "5 seconds counted by interrupt" \
+		&& { echo "  PASS: completion message"; PASS=$$((PASS+1)); } \
+		|| { echo "  FAIL: completion message"; FAIL=$$((FAIL+1)); }; \
+	echo "$$OUTPUT" | grep -q "tick 11" \
+		&& { echo "  FAIL: counted past 10"; FAIL=$$((FAIL+1)); } \
+		|| { echo "  PASS: no extra ticks"; PASS=$$((PASS+1)); }; \
+	TICK_COUNT=$$(echo "$$OUTPUT" | grep -c "^  tick "); \
+	[ "$$TICK_COUNT" -eq 10 ] \
+		&& { echo "  PASS: exactly 10 tick lines"; PASS=$$((PASS+1)); } \
+		|| { echo "  FAIL: expected 10 tick lines, got $$TICK_COUNT"; FAIL=$$((FAIL+1)); }; \
 	echo "$$PASS passed, $$FAIL failed"; \
 	[ $$FAIL -eq 0 ]
 
