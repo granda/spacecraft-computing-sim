@@ -20,8 +20,8 @@ Set up an ARM cross-compilation environment and write bare-metal C targeting an 
 
 Clone FreeRTOS and run it on the same QEMU Cortex-M3 target. Learn RTOS fundamentals through progressive exercises.
 
-- [ ] Two tasks printing to UART at different rates
-- [ ] Share data between tasks via a FreeRTOS queue
+- [x] Two tasks printing to UART at different rates
+- [x] Share data between tasks via a FreeRTOS queue
 - [ ] Watchdog timer that resets if a task hangs
 - [ ] Sensor-reading pipeline with priority-based scheduling
 - [ ] Trigger and resolve a priority inversion scenario
