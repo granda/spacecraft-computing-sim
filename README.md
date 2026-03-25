@@ -22,7 +22,7 @@ Clone FreeRTOS and run it on the same QEMU Cortex-M3 target. Learn RTOS fundamen
 
 - [x] Two tasks printing to UART at different rates
 - [x] Share data between tasks via a FreeRTOS queue
-- [ ] Watchdog timer that resets if a task hangs
+- [x] Watchdog timer that resets if a task hangs
 - [ ] Sensor-reading pipeline with priority-based scheduling
 - [ ] Trigger and resolve a priority inversion scenario
 
