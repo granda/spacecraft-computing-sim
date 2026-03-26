@@ -23,14 +23,14 @@ Clone FreeRTOS and run it on the same QEMU Cortex-M3 target. Learn RTOS fundamen
 - [x] Two tasks printing to UART at different rates
 - [x] Share data between tasks via a FreeRTOS queue
 - [x] Watchdog timer that resets if a task hangs
-- [ ] Sensor-reading pipeline with priority-based scheduling
+- [x] Sensor-reading pipeline with priority-based scheduling
 - [x] Trigger and resolve a priority inversion scenario
 
 ### Phase 3: ION DTN on Linux
 
 Build NASA JPL's delay-tolerant networking stack and simulate space-like network conditions.
 
-- [ ] Two-node DTN network in Docker containers
+- [x] Two-node DTN network in Docker containers
 - [ ] Simulated degraded links with `tc netem` (latency, packet loss, intermittent connectivity)
 - [ ] Bundle transfer over degraded link
 - [ ] File transfer using CFDP
@@ -54,8 +54,9 @@ FreeRTOS "spacecraft" sends telemetry over DTN to a "ground station" — a minia
 
 ```bash
 sudo apt install gcc-arm-none-eabi qemu-system-arm build-essential
-make -C phase1 run    # build and run in QEMU (Ctrl-A, X to exit)
-make -C phase1 test   # run integration tests
+make -C phase1 run    # bare-metal: build and run in QEMU (Ctrl-A, X to exit)
+make -C phase2 run    # FreeRTOS: sensor pipeline demo
+make -C phase2 test   # run integration tests (7 assertions)
 ```
 
 ## Key Concepts

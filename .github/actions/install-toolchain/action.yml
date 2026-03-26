@@ -1,0 +1,20 @@
+name: Install ARM Toolchain
+description: Install gcc-arm-none-eabi and qemu-system-arm with apt caching
+
+runs:
+  using: composite
+  steps:
+    - name: Cache apt archives
+      id: cache-apt
+      uses: actions/cache@v4
+      with:
+        path: /var/cache/apt/archives
+        # Bump v1 -> v2 etc. to force cache invalidation
+        key: apt-arm-${{ runner.os }}-v1
+    - name: Install toolchain
+      shell: bash
+      run: |
+        if [ "${{ steps.cache-apt.outputs.cache-hit }}" != "true" ]; then
+          sudo apt-get update
+        fi
+        sudo apt-get install -y gcc-arm-none-eabi qemu-system-arm

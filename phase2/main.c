@@ -1,32 +1,26 @@
 /*
- * FreeRTOS priority inversion demo for MPS2-AN385 (Cortex-M3) on QEMU
+ * FreeRTOS sensor pipeline demo for MPS2-AN385 (Cortex-M3) on QEMU
  *
- * Demonstrates the classic priority inversion problem and its fix:
+ * Models a spacecraft sensor-to-telemetry pipeline with priority scheduling:
  *
- * THREE TASKS share a resource (simulated by a semaphore/mutex):
- *   - LOW priority:  acquires the lock, does "slow work" (long delay while holding it)
- *   - HIGH priority: needs the lock to do its work, blocks waiting for it
- *   - MEDIUM priority: doesn't use the lock, just runs compute work
+ *   Temp Sensor (pri 1, 1 Hz)  ──┐
+ *                                 ├──> Processor (pri 3) ──> Telemetry (pri 2)
+ *   Gyro Sensor (pri 4, 10 Hz) ──┘
  *
- * THE BUG (priority inversion):
- *   1. LOW acquires the lock
- *   2. HIGH wakes up, tries to acquire the lock, blocks
- *   3. MEDIUM wakes up — it doesn't need the lock, so it runs
- *   4. MEDIUM preempts LOW (higher priority), preventing LOW from releasing the lock
- *   5. HIGH is stuck waiting for LOW, but LOW can't run because MEDIUM is hogging the CPU
- *   => HIGH is effectively running at LOW's priority — "inverted"
+ * The gyroscope runs at higher priority and rate than the temperature sensor,
+ * mirroring real spacecraft where attitude control sensors are more critical
+ * than housekeeping sensors. The processor task aggregates readings from both
+ * sensors via a shared queue and forwards processed results to telemetry.
  *
- * THE FIX (priority inheritance):
- *   FreeRTOS mutexes (not binary semaphores) implement priority inheritance:
- *   when HIGH blocks on a mutex held by LOW, the kernel temporarily boosts
- *   LOW to HIGH's priority so it can finish and release the mutex.
- *   MEDIUM can no longer preempt LOW, and HIGH gets the lock promptly.
- *
- * This bug nearly killed the Mars Pathfinder mission in 1997.
+ * Key concepts demonstrated:
+ *   - Multiple producers at different priorities sharing a single queue
+ *   - Priority-based preemption ensuring critical sensors are never starved
+ *   - A processing stage between raw sensors and telemetry output
  */
 
 #include "FreeRTOS.h"
 #include "task.h"
+#include "queue.h"
 #include "semphr.h"
 
 #include <stdio.h>
@@ -34,16 +28,49 @@
 
 #include "board.h"
 
-/* Task priorities */
-#define LOW_PRIORITY    (tskIDLE_PRIORITY + 1)
-#define MEDIUM_PRIORITY (tskIDLE_PRIORITY + 2)
-#define HIGH_PRIORITY   (tskIDLE_PRIORITY + 3)
+/* Task priorities — gyro is highest (most time-critical) */
+#define TEMP_TASK_PRIORITY       (tskIDLE_PRIORITY + 1)
+#define TELEMETRY_TASK_PRIORITY  (tskIDLE_PRIORITY + 2)
+#define PROCESSOR_TASK_PRIORITY  (tskIDLE_PRIORITY + 3)
+#define GYRO_TASK_PRIORITY       (tskIDLE_PRIORITY + 4)
 
-/* The shared resource lock — will be either a binary semaphore (buggy)
- * or a mutex (fixed), controlled by USE_MUTEX_FIX */
-#define USE_MUTEX_FIX  0  /* Set to 1 to enable priority inheritance fix */
+/* Sensor rates */
+#define TEMP_PERIOD_MS  1000  /* 1 Hz — housekeeping */
+#define GYRO_PERIOD_MS  100   /* 10 Hz — attitude control */
 
-static SemaphoreHandle_t xSharedLock = NULL;
+/* Stop after this many processed readings */
+#define MAX_PROCESSED  30
+
+/* Sentinel sequence number — signals telemetry task to shut down */
+#define SENTINEL_SEQ   UINT32_MAX
+
+/* Sensor IDs */
+#define SENSOR_TEMP  1
+#define SENSOR_GYRO  2
+
+/* Calibration parameters */
+#define TEMP_CAL_OFFSET  (-10)   /* centidegrees bias correction */
+#define GYRO_SCALE_FACTOR  2     /* raw-to-calibrated multiplier */
+
+/* Raw sensor reading — sent from sensors to processor */
+typedef struct {
+    uint32_t sensor_id;
+    int32_t  raw_value;
+    uint32_t timestamp;
+} RawReading_t;
+
+/* Processed reading — sent from processor to telemetry */
+typedef struct {
+    uint32_t sensor_id;
+    int32_t  value;       /* Processed/calibrated value */
+    uint32_t timestamp;
+    uint32_t seq;         /* Sequence number */
+} ProcessedReading_t;
+
+/* Queues */
+static QueueHandle_t xRawQueue = NULL;       /* sensors → processor */
+static QueueHandle_t xTelemetryQueue = NULL; /* processor → telemetry */
+
 static SemaphoreHandle_t xPrintMutex = NULL;
 
 /* Thread-safe printf: takes the mutex, prints, releases.
@@ -64,107 +91,167 @@ static void prvUARTInit(void)
     UART0_CTRL = 1;
 }
 
-/* Burn CPU cycles to simulate work (busy-wait, not a FreeRTOS delay).
- * Iteration counts are empirically tuned for QEMU on desktop hardware —
- * adjust if tests become flaky on slow CI runners. */
-static void prvBusyWork(uint32_t iterations)
-{
-    volatile uint32_t i;
-    for (i = 0; i < iterations; i++);
-}
-
 /*-----------------------------------------------------------*/
 
 /*
- * LOW priority task: acquires the shared lock, does slow work while
- * holding it, then releases. This simulates a task that legitimately
- * holds a resource for a long time (e.g., writing to flash).
+ * Temperature sensor: low priority, low rate (1 Hz).
+ * Housekeeping — not time-critical. Can be preempted by the gyro.
  */
-static void prvLowTask(void *pvParameters)
+static void prvTempSensorTask(void *pvParameters)
 {
     (void)pvParameters;
+    TickType_t xLastWakeTime = xTaskGetTickCount();
+    RawReading_t xReading;
+
+    safe_printf("[TEMP]  Sensor online (1 Hz, priority %u)\r\n",
+                (unsigned)uxTaskPriorityGet(NULL));
 
     for (;;) {
-        vTaskDelay(pdMS_TO_TICKS(100));
+        vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(TEMP_PERIOD_MS));
 
-        safe_printf("[LOW]  Acquiring lock...\r\n");
-        xSemaphoreTake(xSharedLock, portMAX_DELAY);
-        safe_printf("[LOW]  Lock acquired — doing slow work\r\n");
+        /* Simulate temperature: 20-25 C range */
+        xReading.sensor_id = SENSOR_TEMP;
+        xReading.raw_value = 2000 + (xLastWakeTime % 500);  /* centidegrees */
+        xReading.timestamp = xLastWakeTime;
 
-        /* Simulate slow work while holding the lock.
-         * Using busy-wait (not vTaskDelay) so the task stays runnable
-         * and can be preempted by medium — that's the whole point.
-         * Must be longer than MEDIUM's wakeup period (200ms) so MEDIUM
-         * gets scheduled while LOW holds the lock. */
-        prvBusyWork(5000000);
-
-        safe_printf("[LOW]  Releasing lock\r\n");
-        xSemaphoreGive(xSharedLock);
+        /* Non-blocking send to preserve timing */
+        if (xQueueSend(xRawQueue, &xReading, 0) != pdPASS) {
+            safe_printf("[TEMP]  Queue full, dropped\r\n");
+        }
     }
 }
 
 /*-----------------------------------------------------------*/
 
 /*
- * MEDIUM priority task: does NOT use the shared lock.
- * It just runs compute work. During priority inversion, this task
- * preempts LOW and prevents it from releasing the lock.
+ * Gyroscope sensor: high priority, high rate (10 Hz).
+ * Attitude control — time-critical. Preempts the temp sensor.
  */
-static void prvMediumTask(void *pvParameters)
+static void prvGyroSensorTask(void *pvParameters)
 {
     (void)pvParameters;
+    TickType_t xLastWakeTime = xTaskGetTickCount();
+    RawReading_t xReading;
+
+    safe_printf("[GYRO]  Sensor online (10 Hz, priority %u)\r\n",
+                (unsigned)uxTaskPriorityGet(NULL));
 
     for (;;) {
-        vTaskDelay(pdMS_TO_TICKS(200));
+        vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(GYRO_PERIOD_MS));
 
-        safe_printf("[MED]  Running (no lock needed)\r\n");
-        prvBusyWork(3000000);
-        safe_printf("[MED]  Done\r\n");
+        /* Simulate gyroscope: angular rate in millidegrees/sec */
+        xReading.sensor_id = SENSOR_GYRO;
+        xReading.raw_value = 150 + (xLastWakeTime % 50);  /* small oscillation */
+        xReading.timestamp = xLastWakeTime;
+
+        if (xQueueSend(xRawQueue, &xReading, 0) != pdPASS) {
+            safe_printf("[GYRO]  Queue full, dropped\r\n");
+        }
     }
 }
 
 /*-----------------------------------------------------------*/
 
 /*
- * HIGH priority task: needs the shared lock to do its work.
- * If LOW holds the lock and MEDIUM preempts LOW, HIGH is stuck.
+ * Processor task: reads raw sensor data, applies calibration/transform,
+ * and forwards processed results to telemetry. In a real spacecraft this
+ * would apply Kalman filtering, unit conversion, limit checking, etc.
  */
-static void prvHighTask(void *pvParameters)
+static void prvProcessorTask(void *pvParameters)
 {
     (void)pvParameters;
-    uint32_t ulCycle = 0;
+    RawReading_t xRaw;
+    ProcessedReading_t xProcessed;
+    uint32_t ulSeq = 0;
+    uint32_t ulDropped = 0;
+
+    safe_printf("[PROC]  Processor online (priority %u)\r\n",
+                (unsigned)uxTaskPriorityGet(NULL));
 
     for (;;) {
-        vTaskDelay(pdMS_TO_TICKS(300));
+        /* Block until a raw reading arrives */
+        if (xQueueReceive(xRawQueue, &xRaw,
+                          pdMS_TO_TICKS(TEMP_PERIOD_MS * 2)) == pdPASS) {
 
-        safe_printf("[HIGH] Acquiring lock...\r\n");
-        TickType_t xStart = xTaskGetTickCount();
-        xSemaphoreTake(xSharedLock, portMAX_DELAY);
-        TickType_t xWait = xTaskGetTickCount() - xStart;
+            /* Simple "calibration": apply offset (real systems do much more) */
+            xProcessed.sensor_id = xRaw.sensor_id;
+            xProcessed.timestamp = xRaw.timestamp;
+            xProcessed.seq = ulSeq++;
 
-        safe_printf("[HIGH] Lock acquired (waited %u ticks)\r\n",
-                    (unsigned)xWait);
+            if (xRaw.sensor_id == SENSOR_TEMP) {
+                xProcessed.value = xRaw.raw_value + TEMP_CAL_OFFSET;
+            } else if (xRaw.sensor_id == SENSOR_GYRO) {
+                xProcessed.value = xRaw.raw_value * GYRO_SCALE_FACTOR;
+            } else {
+                safe_printf("[PROC]  Unknown sensor_id %u\r\n",
+                            (unsigned)xRaw.sensor_id);
+                xProcessed.value = xRaw.raw_value;
+            }
 
-        /* Do quick work with the shared resource */
-        prvBusyWork(100000);
+            /* Forward to telemetry — block briefly to let telemetry drain */
+            if (xQueueSend(xTelemetryQueue, &xProcessed,
+                           pdMS_TO_TICKS(100)) != pdPASS) {
+                ulDropped++;
+                safe_printf("[PROC]  Telemetry queue full, dropped #%u\r\n",
+                            (unsigned)ulSeq - 1);
+            }
 
-        xSemaphoreGive(xSharedLock);
-        safe_printf("[HIGH] Released lock\r\n");
+            /* Stop after MAX_PROCESSED readings — send sentinel so
+             * the lower-priority telemetry task can drain its queue
+             * before the system halts. */
+            if (ulSeq >= MAX_PROCESSED) {
+                safe_printf("\r\n[PROC]  === Pipeline complete: %u processed, %u dropped ===\r\n",
+                            (unsigned)ulSeq, (unsigned)ulDropped);
+                ProcessedReading_t xSentinel = { 0, 0, 0, SENTINEL_SEQ };
+                xQueueSend(xTelemetryQueue, &xSentinel, portMAX_DELAY);
+                /* Block forever — telemetry task will halt after draining.
+                 * Sensor tasks and this task remain allocated (TCBs not freed);
+                 * acceptable for a demo that halts shortly after. */
+                vTaskSuspend(NULL);
+            }
+        }
+    }
+}
 
-        ulCycle++;
-        if (ulCycle >= 3) {
-            safe_printf("\r\n[HIGH] === Demo complete after 3 cycles ===\r\n");
-#if USE_MUTEX_FIX
-            safe_printf("[HIGH] Priority inheritance was ENABLED (mutex)\r\n");
-            safe_printf("[HIGH] HIGH waited minimal ticks — MEDIUM could not block LOW\r\n");
-#else
-            safe_printf("[HIGH] Priority inheritance was DISABLED (binary semaphore)\r\n");
-            safe_printf("[HIGH] HIGH waited many ticks — MEDIUM preempted LOW\r\n");
-#endif
-            safe_printf("[HIGH] Done.\r\n");
-            /* Halt — on real hardware a reset would follow */
-            portDISABLE_INTERRUPTS();
-            for (;;);
+/*-----------------------------------------------------------*/
+
+/*
+ * Telemetry task: receives processed readings and outputs them.
+ * In a real spacecraft this would format CCSDS packets for downlink.
+ */
+static void prvTelemetryTask(void *pvParameters)
+{
+    (void)pvParameters;
+    ProcessedReading_t xData;
+
+    safe_printf("[TELEM] Telemetry online (priority %u)\r\n",
+                (unsigned)uxTaskPriorityGet(NULL));
+
+    for (;;) {
+        if (xQueueReceive(xTelemetryQueue, &xData,
+                          pdMS_TO_TICKS(TEMP_PERIOD_MS * 2)) == pdPASS) {
+
+            /* Sentinel from processor — all real data has been printed */
+            if (xData.seq == SENTINEL_SEQ) {
+                safe_printf("[TELEM] All readings transmitted\r\n");
+                portDISABLE_INTERRUPTS();
+                for (;;);
+            }
+
+            const char *pcName;
+            if (xData.sensor_id == SENSOR_TEMP) {
+                pcName = "TEMP";
+            } else if (xData.sensor_id == SENSOR_GYRO) {
+                pcName = "GYRO";
+            } else {
+                pcName = "UNKN";
+            }
+
+            safe_printf("[TELEM] #%03u %s: %d at tick %u\r\n",
+                        (unsigned)xData.seq,
+                        pcName,
+                        (int)xData.value,
+                        (unsigned)xData.timestamp);
         }
     }
 }
@@ -176,43 +263,35 @@ int main(void)
     prvUARTInit();
 
     /* Raw printf — mutex not yet created, scheduler not running */
-    printf("FreeRTOS Priority Inversion Demo\r\n");
-    printf("================================\r\n");
-#if USE_MUTEX_FIX
-    printf("Mode: MUTEX (priority inheritance enabled)\r\n\r\n");
-#else
-    printf("Mode: BINARY SEMAPHORE (no priority inheritance)\r\n\r\n");
-#endif
+    printf("FreeRTOS Sensor Pipeline Demo\r\n");
+    printf("=============================\r\n\r\n");
 
     xPrintMutex = xSemaphoreCreateMutex();
     configASSERT(xPrintMutex != NULL);
 
-#if USE_MUTEX_FIX
-    /* Mutex: FreeRTOS temporarily boosts LOW to HIGH's priority
-     * when HIGH blocks on it — this prevents priority inversion */
-    xSharedLock = xSemaphoreCreateMutex();
-#else
-    /* Binary semaphore: NO priority inheritance.
-     * MEDIUM can preempt LOW while it holds the lock, blocking HIGH */
-    xSharedLock = xSemaphoreCreateBinary();
-#endif
-    configASSERT(xSharedLock != NULL);
-#if !USE_MUTEX_FIX
-    BaseType_t xGiven = xSemaphoreGive(xSharedLock);  /* Start in "available" state */
-    configASSERT(xGiven == pdPASS);
-#endif
+    /* Raw queue: sensors → processor (large enough for 10 Hz gyro burst) */
+    xRawQueue = xQueueCreate(20, sizeof(RawReading_t));
+    configASSERT(xRawQueue != NULL);
+
+    /* Telemetry queue: processor → telemetry */
+    xTelemetryQueue = xQueueCreate(10, sizeof(ProcessedReading_t));
+    configASSERT(xTelemetryQueue != NULL);
 
     BaseType_t xResult;
-    xResult = xTaskCreate(prvLowTask, "Low", configMINIMAL_STACK_SIZE * 4,
-                          NULL, LOW_PRIORITY, NULL);
+    xResult = xTaskCreate(prvTempSensorTask, "Temp", configMINIMAL_STACK_SIZE * 4,
+                          NULL, TEMP_TASK_PRIORITY, NULL);
     configASSERT(xResult == pdPASS);
 
-    xResult = xTaskCreate(prvMediumTask, "Medium", configMINIMAL_STACK_SIZE * 4,
-                          NULL, MEDIUM_PRIORITY, NULL);
+    xResult = xTaskCreate(prvGyroSensorTask, "Gyro", configMINIMAL_STACK_SIZE * 4,
+                          NULL, GYRO_TASK_PRIORITY, NULL);
     configASSERT(xResult == pdPASS);
 
-    xResult = xTaskCreate(prvHighTask, "High", configMINIMAL_STACK_SIZE * 4,
-                          NULL, HIGH_PRIORITY, NULL);
+    xResult = xTaskCreate(prvProcessorTask, "Proc", configMINIMAL_STACK_SIZE * 4,
+                          NULL, PROCESSOR_TASK_PRIORITY, NULL);
+    configASSERT(xResult == pdPASS);
+
+    xResult = xTaskCreate(prvTelemetryTask, "Telem", configMINIMAL_STACK_SIZE * 4,
+                          NULL, TELEMETRY_TASK_PRIORITY, NULL);
     configASSERT(xResult == pdPASS);
 
     vTaskStartScheduler();

@@ -1,0 +1,27 @@
+name: "Build: Phase 1"
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - phase1/**
+      - .github/actions/install-toolchain/**
+      - .github/workflows/build-phase1.yml
+  pull_request:
+    paths:
+      - phase1/**
+      - .github/actions/install-toolchain/**
+      - .github/workflows/build-phase1.yml
+
+jobs:
+  phase1:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+      - uses: ./.github/actions/install-toolchain
+      - name: Build and test phase1
+        run: make -C phase1 test

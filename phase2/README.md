@@ -1,20 +1,21 @@
 # Phase 2: FreeRTOS on QEMU
 
-Two FreeRTOS tasks communicating via a queue on the same QEMU MPS2-AN385 (Cortex-M3) target from Phase 1 — now with an RTOS managing task scheduling.
+A sensor-to-telemetry pipeline with priority-based scheduling on QEMU MPS2-AN385 (Cortex-M3) — four FreeRTOS tasks modeling how a real spacecraft processes sensor data.
 
 ## Architecture
 
 ```
-+-------------+       +-----------+       +---------------+
-| Sensor Task |  -->  |   Queue   |  -->  | Telemetry Task|  -->  UART
-| (pri 1)     |       | (5 slots) |       | (pri 2)       |
-| 500ms cycle |       |           |       | blocks on rx  |
-+-------------+       +-----------+       +---------------+
+Temp Sensor (pri 1, 1 Hz)  ──┐              ┌──> Telemetry (pri 2)
+                             ├──> Raw Queue ├──> Processor (pri 3) ──> Telemetry Queue
+Gyro Sensor (pri 4, 10 Hz) ──┘
 ```
 
-- **Sensor task** (priority 1): wakes every 500ms via `vTaskDelayUntil`, generates a fake temperature reading, sends it to the queue (non-blocking)
-- **Telemetry task** (priority 2): blocks on the queue, prints each reading over UART as it arrives
-- Higher priority means the telemetry task runs immediately when data is available, preempting the sensor task
+- **Gyro sensor** (priority 4, 10 Hz): attitude control — highest priority, highest rate. Preempts everything except interrupts.
+- **Processor** (priority 3): reads raw queue, applies calibration (`TEMP_CAL_OFFSET`, `GYRO_SCALE_FACTOR`), forwards to telemetry queue. Blocking send with 100ms timeout prevents overflow. Tracks drop count.
+- **Telemetry** (priority 2): formats and prints processed readings over UART.
+- **Temp sensor** (priority 1, 1 Hz): housekeeping — lowest priority, lowest rate. Can be preempted by everything.
+
+Shutdown uses a sentinel value in the telemetry queue so all readings are printed before halt.
 
 ## Quick Start
 
@@ -27,47 +28,64 @@ git submodule update --init --recursive
 
 # Build and run
 make -C phase2 run    # Ctrl-A, X to exit QEMU
-make -C phase2 test   # 3 integration tests
+make -C phase2 test   # 7 integration tests
 ```
 
 ## Output
 
 ```
-FreeRTOS Spacecraft Telemetry Demo
-==================================
-[TELEMETRY] Task started, waiting for sensor data...
-[TELEMETRY] Sensor 1: 20.00 C at tick 500
-[TELEMETRY] Sensor 1: 20.01 C at tick 1000
-[TELEMETRY] Sensor 1: 20.02 C at tick 1500
+FreeRTOS Sensor Pipeline Demo
+=============================
+
+[GYRO]  Sensor online (10 Hz, priority 4)
+[PROC]  Processor online (priority 3)
+[TELEM] Telemetry online (priority 2)
+[TEMP]  Sensor online (1 Hz, priority 1)
+[TELEM] #000 GYRO: 300 at tick 100
+[TELEM] #001 GYRO: 302 at tick 200
+...
+[TELEM] #010 TEMP: 1991 at tick 1001    ← temp reading between gyro bursts
+...
+[PROC]  === Pipeline complete: 30 processed, 0 dropped ===
+[TELEM] All readings transmitted
 ```
 
 ## Key Concepts
 
-### What changed from Phase 1
+### Priority-based preemption
 
-In Phase 1, `main()` runs sequentially — one thread of execution, no concurrency. Here, `main()` creates tasks and starts the FreeRTOS scheduler. From that point, FreeRTOS owns the CPU and switches between tasks based on priority and timing.
+The gyro sensor runs at 10 Hz and priority 4 — it will always preempt the processor (3), telemetry (2), and temp sensor (1). This mirrors real spacecraft where attitude control sensors are more time-critical than housekeeping sensors.
 
 ### vTaskDelayUntil vs vTaskDelay
 
-`vTaskDelay(500)` sleeps for 500ms *after* the task finishes its work — so the actual period is 500ms + work time, and it drifts. `vTaskDelayUntil` wakes at absolute tick intervals regardless of work time. That's why the ticks in the output are exactly 500 apart.
+`vTaskDelay(100)` sleeps for 100ms *after* the task finishes its work — so the actual period drifts. `vTaskDelayUntil` wakes at absolute tick intervals regardless of work time. Both sensor tasks use this for drift-resistant scheduling.
 
-### Queues
+### Non-blocking sensor sends
 
-Tasks don't share memory directly — they communicate through FreeRTOS queues. The sensor task puts a `SensorReading_t` struct into the queue; the telemetry task blocks until one arrives. This decouples the producer from the consumer and is the standard RTOS inter-task communication pattern.
+Sensor tasks use zero-timeout queue sends. If the raw queue is full, they drop the reading and log it rather than blocking — this preserves timing guarantees. A blocked send could cause a sensor to miss its next deadline.
 
-### Non-blocking sends
+### Blocking processor sends
 
-The sensor task uses a zero-timeout queue send. If the queue is full, it drops the reading and logs it rather than blocking — this preserves the 500ms timing guarantee. A blocked send could cause the task to miss its next deadline.
+The processor uses a 100ms timeout when sending to the telemetry queue. This gives the lower-priority telemetry task time to drain without dropping readings unnecessarily. Drops are counted and reported at shutdown.
+
+### Sentinel-based shutdown
+
+`taskYIELD()` only yields to equal-or-higher priority tasks, so it can't hand control to the lower-priority telemetry task. Instead, the processor sends a sentinel value through the telemetry queue and suspends. The telemetry task processes all real readings, then halts when it sees the sentinel.
+
+### Thread-safe output
+
+All task-context UART output uses `safe_printf`, which wraps `printf` in a mutex. Fatal error hooks (malloc failed, stack overflow) use raw `printf` since the mutex may be held.
 
 ## Project Structure
 
 ```
-main.c            — Application: tasks, queue, UART init, FreeRTOS hooks
+main.c            — Application: tasks, queues, calibration, UART init, FreeRTOS hooks
 FreeRTOSConfig.h  — RTOS configuration (tick rate, stack sizes, features)
-startup_gcc.c     — Vector table, Reset_Handler with .data/.bss init (from FreeRTOS demo, customized)
-printf-stdarg.c   — Lightweight printf for UART output (from FreeRTOS demo, customized)
-mps2_m3.ld        — Linker script (from FreeRTOS demo, customized)
-Makefile           — Build system
+startup_gcc.c     — Vector table, Reset_Handler with .data/.bss init
+printf-stdarg.c   — Lightweight printf for UART output
+mps2_m3.ld        — Linker script
+board.h           — MPS2-AN385 UART register definitions
+Makefile           — Build system with QEMU integration tests
 freertos-kernel/   — Git submodule → FreeRTOS/FreeRTOS-Kernel
 ```
 

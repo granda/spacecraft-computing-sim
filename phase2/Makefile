@@ -3,7 +3,7 @@ SIZE        = arm-none-eabi-size
 QEMU        = qemu-system-arm
 QEMU_FLAGS  = -machine mps2-an385 -cpu cortex-m3 -nographic
 TIMEOUT_CMD ?= timeout
-TIMEOUT     ?= 20
+TIMEOUT     ?= 10
 
 BUILD       = build
 
@@ -54,34 +54,32 @@ dirs:
 run: $(BUILD)/firmware.elf
 	$(QEMU) $(QEMU_FLAGS) -kernel $<
 
-# NOTE: CI only tests USE_MUTEX_FIX=0 (the buggy path). The fix path
-# (USE_MUTEX_FIX=1) must be tested manually. Timing-based assertions are
-# avoided because QEMU execution speed varies across hosts.
 test: $(BUILD)/firmware.elf
 	@echo "Running QEMU integration tests..."
 	@OUTPUT=$$($(TIMEOUT_CMD) $(TIMEOUT) $(QEMU) $(QEMU_FLAGS) -kernel $< 2>&1); \
 	PASS=0; FAIL=0; \
-	echo "$$OUTPUT" | grep -q "Priority Inversion Demo" \
+	echo "$$OUTPUT" | grep -q "Sensor Pipeline Demo" \
 		&& { echo "  PASS: boot banner"; PASS=$$((PASS+1)); } \
 		|| { echo "  FAIL: boot banner"; FAIL=$$((FAIL+1)); }; \
-	echo "$$OUTPUT" | grep -q "\[LOW\].*Lock acquired" \
-		&& { echo "  PASS: low task acquired lock"; PASS=$$((PASS+1)); } \
-		|| { echo "  FAIL: low task acquired lock"; FAIL=$$((FAIL+1)); }; \
-	echo "$$OUTPUT" | grep -q "\[HIGH\].*Lock acquired" \
-		&& { echo "  PASS: high task acquired lock"; PASS=$$((PASS+1)); } \
-		|| { echo "  FAIL: high task acquired lock"; FAIL=$$((FAIL+1)); }; \
-	echo "$$OUTPUT" | grep -q "\[MED\].*Running" \
-		&& { echo "  PASS: medium task ran"; PASS=$$((PASS+1)); } \
-		|| { echo "  FAIL: medium task ran"; FAIL=$$((FAIL+1)); }; \
-	echo "$$OUTPUT" | grep -q "Demo complete" \
-		&& { echo "  PASS: demo completed"; PASS=$$((PASS+1)); } \
-		|| { echo "  FAIL: demo completed"; FAIL=$$((FAIL+1)); }; \
-	echo "$$OUTPUT" | grep -qi "priority inheritance" \
-		&& { echo "  PASS: mode summary printed"; PASS=$$((PASS+1)); } \
-		|| { echo "  FAIL: mode summary printed"; FAIL=$$((FAIL+1)); }; \
-	echo "$$OUTPUT" | grep -qE "waited [0-9]+ ticks" \
-		&& { echo "  PASS: wait time reported"; PASS=$$((PASS+1)); } \
-		|| { echo "  FAIL: wait time reported"; FAIL=$$((FAIL+1)); }; \
+	echo "$$OUTPUT" | grep -q "\[TEMP\].*Sensor online" \
+		&& { echo "  PASS: temp sensor started"; PASS=$$((PASS+1)); } \
+		|| { echo "  FAIL: temp sensor started"; FAIL=$$((FAIL+1)); }; \
+	echo "$$OUTPUT" | grep -q "\[GYRO\].*Sensor online" \
+		&& { echo "  PASS: gyro sensor started"; PASS=$$((PASS+1)); } \
+		|| { echo "  FAIL: gyro sensor started"; FAIL=$$((FAIL+1)); }; \
+	echo "$$OUTPUT" | grep -q "\[TELEM\].*TEMP:" \
+		&& { echo "  PASS: temp telemetry received"; PASS=$$((PASS+1)); } \
+		|| { echo "  FAIL: temp telemetry received"; FAIL=$$((FAIL+1)); }; \
+	echo "$$OUTPUT" | grep -q "\[TELEM\].*GYRO:" \
+		&& { echo "  PASS: gyro telemetry received"; PASS=$$((PASS+1)); } \
+		|| { echo "  FAIL: gyro telemetry received"; FAIL=$$((FAIL+1)); }; \
+	echo "$$OUTPUT" | grep -q "Pipeline complete.*processed.*dropped" \
+		&& { echo "  PASS: pipeline completed"; PASS=$$((PASS+1)); } \
+		|| { echo "  FAIL: pipeline completed"; FAIL=$$((FAIL+1)); }; \
+	TELEM_COUNT=$$(echo "$$OUTPUT" | grep -c "\[TELEM\] #"); \
+	[ "$$TELEM_COUNT" -eq 30 ] \
+		&& { echo "  PASS: all 30 telemetry readings printed (got $$TELEM_COUNT)"; PASS=$$((PASS+1)); } \
+		|| { echo "  FAIL: expected 30 telemetry readings, got $$TELEM_COUNT"; FAIL=$$((FAIL+1)); }; \
 	echo "$$PASS passed, $$FAIL failed"; \
 	[ $$FAIL -eq 0 ]
 
