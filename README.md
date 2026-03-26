@@ -24,7 +24,7 @@ Clone FreeRTOS and run it on the same QEMU Cortex-M3 target. Learn RTOS fundamen
 - [x] Share data between tasks via a FreeRTOS queue
 - [x] Watchdog timer that resets if a task hangs
 - [ ] Sensor-reading pipeline with priority-based scheduling
-- [ ] Trigger and resolve a priority inversion scenario
+- [x] Trigger and resolve a priority inversion scenario
 
 ### Phase 3: ION DTN on Linux
 

@@ -1,19 +1,32 @@
 /*
- * FreeRTOS watchdog timer demo for MPS2-AN385 (Cortex-M3) on QEMU
+ * FreeRTOS priority inversion demo for MPS2-AN385 (Cortex-M3) on QEMU
  *
- * Builds on the two-task telemetry demo by adding a software watchdog:
- *   - Each task must "kick" the watchdog periodically to prove it's alive
- *   - A high-priority watchdog task checks the kick counters
- *   - If a task stops kicking (hangs), the watchdog detects it and alerts
- *   - The sensor task deliberately hangs after 5 readings to trigger the watchdog
+ * Demonstrates the classic priority inversion problem and its fix:
  *
- * This models how spacecraft detect and recover from stuck software.
- * On real hardware, the watchdog would trigger a system reset.
+ * THREE TASKS share a resource (simulated by a semaphore/mutex):
+ *   - LOW priority:  acquires the lock, does "slow work" (long delay while holding it)
+ *   - HIGH priority: needs the lock to do its work, blocks waiting for it
+ *   - MEDIUM priority: doesn't use the lock, just runs compute work
+ *
+ * THE BUG (priority inversion):
+ *   1. LOW acquires the lock
+ *   2. HIGH wakes up, tries to acquire the lock, blocks
+ *   3. MEDIUM wakes up — it doesn't need the lock, so it runs
+ *   4. MEDIUM preempts LOW (higher priority), preventing LOW from releasing the lock
+ *   5. HIGH is stuck waiting for LOW, but LOW can't run because MEDIUM is hogging the CPU
+ *   => HIGH is effectively running at LOW's priority — "inverted"
+ *
+ * THE FIX (priority inheritance):
+ *   FreeRTOS mutexes (not binary semaphores) implement priority inheritance:
+ *   when HIGH blocks on a mutex held by LOW, the kernel temporarily boosts
+ *   LOW to HIGH's priority so it can finish and release the mutex.
+ *   MEDIUM can no longer preempt LOW, and HIGH gets the lock promptly.
+ *
+ * This bug nearly killed the Mars Pathfinder mission in 1997.
  */
 
 #include "FreeRTOS.h"
 #include "task.h"
-#include "queue.h"
 #include "semphr.h"
 
 #include <stdio.h>
@@ -21,33 +34,16 @@
 
 #include "board.h"
 
-/* Task priorities — watchdog is highest */
-#define SENSOR_TASK_PRIORITY    (tskIDLE_PRIORITY + 1)
-#define TELEMETRY_TASK_PRIORITY (tskIDLE_PRIORITY + 2)
-#define WATCHDOG_TASK_PRIORITY  (tskIDLE_PRIORITY + 3)
+/* Task priorities */
+#define LOW_PRIORITY    (tskIDLE_PRIORITY + 1)
+#define MEDIUM_PRIORITY (tskIDLE_PRIORITY + 2)
+#define HIGH_PRIORITY   (tskIDLE_PRIORITY + 3)
 
-/* Timing */
-#define SENSOR_PERIOD_MS              500
-#define WATCHDOG_PERIOD_MS            2000  /* Check every 2 seconds */
-#define TELEMETRY_RECEIVE_TIMEOUT_MS  (SENSOR_PERIOD_MS * 2)
+/* The shared resource lock — will be either a binary semaphore (buggy)
+ * or a mutex (fixed), controlled by USE_MUTEX_FIX */
+#define USE_MUTEX_FIX  0  /* Set to 1 to enable priority inheritance fix */
 
-_Static_assert(TELEMETRY_RECEIVE_TIMEOUT_MS < WATCHDOG_PERIOD_MS,
-               "Telemetry timeout must be shorter than watchdog period");
-
-/* Queue holds up to 5 sensor readings */
-#define QUEUE_LENGTH 5
-
-/* After this many readings, the sensor task will deliberately hang */
-#define HANG_AFTER_READING 5
-
-/* Message passed between tasks */
-typedef struct {
-    uint32_t sensor_id;
-    uint32_t value;
-    uint32_t timestamp;
-} SensorReading_t;
-
-static QueueHandle_t xSensorQueue = NULL;
+static SemaphoreHandle_t xSharedLock = NULL;
 static SemaphoreHandle_t xPrintMutex = NULL;
 
 /* Thread-safe printf: takes the mutex, prints, releases.
@@ -60,22 +56,6 @@ static SemaphoreHandle_t xPrintMutex = NULL;
     } while (0)
 
 /*-----------------------------------------------------------*/
-/* Watchdog kick counters                                    */
-/*-----------------------------------------------------------*/
-
-/*
- * Each monitored task increments its counter every cycle.
- * The watchdog task snapshots these counters periodically.
- * If a counter hasn't changed since the last snapshot, that task is stuck.
- *
- * volatile prevents the compiler from caching counter values in registers
- * across loop iterations. On single-core Cortex-M3, 32-bit aligned
- * reads/writes are natively atomic so no torn-read concern exists.
- */
-static volatile uint32_t ulSensorKicks = 0;
-static volatile uint32_t ulTelemetryKicks = 0;
-
-/*-----------------------------------------------------------*/
 
 static void prvUARTInit(void)
 {
@@ -84,128 +64,108 @@ static void prvUARTInit(void)
     UART0_CTRL = 1;
 }
 
-/*-----------------------------------------------------------*/
-
-static void prvSensorTask(void *pvParameters)
+/* Burn CPU cycles to simulate work (busy-wait, not a FreeRTOS delay).
+ * Iteration counts are empirically tuned for QEMU on desktop hardware —
+ * adjust if tests become flaky on slow CI runners. */
+static void prvBusyWork(uint32_t iterations)
 {
-    (void)pvParameters;
-    TickType_t xLastWakeTime = xTaskGetTickCount();
-    SensorReading_t xReading;
-    uint32_t ulReadingCount = 0;
-
-    for (;;) {
-        vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(SENSOR_PERIOD_MS));
-
-        xReading.sensor_id = 1;
-        xReading.value = 2000 + (ulReadingCount % 100);
-        xReading.timestamp = xLastWakeTime;
-
-        /* Non-blocking send — drop reading if queue is full to preserve timing */
-        if (xQueueSend(xSensorQueue, &xReading, 0) != pdPASS) {
-            /* Raw printf to avoid blocking on xPrintMutex */
-            printf("[SENSOR] Queue full, dropped reading %u\r\n",
-                   (unsigned)ulReadingCount);
-        }
-        ulReadingCount++;
-
-        /* Kick the watchdog — "I'm still alive".
-         * This fires before the hang check, so the watchdog sees exactly
-         * HANG_AFTER_READING kicks before the task stops responding. */
-        ulSensorKicks++;
-
-        /* Deliberately hang after HANG_AFTER_READING readings
-         * to demonstrate the watchdog catching a stuck task */
-        if (ulReadingCount >= HANG_AFTER_READING) {
-            safe_printf("[SENSOR] Simulating hang after %u readings...\r\n",
-                        (unsigned)ulReadingCount);
-            for (;;);  /* stuck! */
-        }
-    }
+    volatile uint32_t i;
+    for (i = 0; i < iterations; i++);
 }
 
 /*-----------------------------------------------------------*/
 
-static void prvTelemetryTask(void *pvParameters)
+/*
+ * LOW priority task: acquires the shared lock, does slow work while
+ * holding it, then releases. This simulates a task that legitimately
+ * holds a resource for a long time (e.g., writing to flash).
+ */
+static void prvLowTask(void *pvParameters)
 {
     (void)pvParameters;
-    SensorReading_t xReceived;
-
-    safe_printf("[TELEMETRY] Task started, waiting for sensor data...\r\n");
 
     for (;;) {
-        /* Bounded timeout so we kick the watchdog even when no data arrives.
-         * Without this, a stopped sensor would make telemetry look stuck too. */
-        if (xQueueReceive(xSensorQueue, &xReceived,
-                          pdMS_TO_TICKS(TELEMETRY_RECEIVE_TIMEOUT_MS)) == pdPASS) {
-            safe_printf("[TELEMETRY] Sensor %u: %u.%02u C at tick %u\r\n",
-                        (unsigned)xReceived.sensor_id,
-                        (unsigned)(xReceived.value / 100),
-                        (unsigned)(xReceived.value % 100),
-                        (unsigned)xReceived.timestamp);
-        }
+        vTaskDelay(pdMS_TO_TICKS(100));
 
-        /* Kick unconditionally — proves this task is alive regardless of data flow */
-        ulTelemetryKicks++;
+        safe_printf("[LOW]  Acquiring lock...\r\n");
+        xSemaphoreTake(xSharedLock, portMAX_DELAY);
+        safe_printf("[LOW]  Lock acquired — doing slow work\r\n");
+
+        /* Simulate slow work while holding the lock.
+         * Using busy-wait (not vTaskDelay) so the task stays runnable
+         * and can be preempted by medium — that's the whole point.
+         * Must be longer than MEDIUM's wakeup period (200ms) so MEDIUM
+         * gets scheduled while LOW holds the lock. */
+        prvBusyWork(5000000);
+
+        safe_printf("[LOW]  Releasing lock\r\n");
+        xSemaphoreGive(xSharedLock);
     }
 }
 
 /*-----------------------------------------------------------*/
 
 /*
- * Watchdog task: runs at the highest priority, checks that every
- * monitored task has made progress since the last check.
- *
- * On real spacecraft, a watchdog timeout would trigger a system reset.
- * Here we just print an alert and halt — enough to demonstrate the concept.
+ * MEDIUM priority task: does NOT use the shared lock.
+ * It just runs compute work. During priority inversion, this task
+ * preempts LOW and prevents it from releasing the lock.
  */
-static void prvWatchdogTask(void *pvParameters)
+static void prvMediumTask(void *pvParameters)
 {
     (void)pvParameters;
-    safe_printf("[WATCHDOG] Monitoring started (checking every %u ms)\r\n",
-                (unsigned)WATCHDOG_PERIOD_MS);
-
-    /* Warm up: let tasks run at least one cycle before checking.
-     * Without this, reducing WATCHDOG_PERIOD_MS below SENSOR_PERIOD_MS
-     * would cause a false alert on the very first check.
-     * Note: first real check fires at ~2x WATCHDOG_PERIOD_MS from boot
-     * (one delay here + one in the loop). This is intentional. */
-    vTaskDelay(pdMS_TO_TICKS(WATCHDOG_PERIOD_MS));
-    uint32_t ulLastSensorKicks = ulSensorKicks;
-    uint32_t ulLastTelemetryKicks = ulTelemetryKicks;
-    TickType_t xLastWakeTime = xTaskGetTickCount();
 
     for (;;) {
-        vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(WATCHDOG_PERIOD_MS));
+        vTaskDelay(pdMS_TO_TICKS(200));
 
-        /* Snapshot current kick counts */
-        uint32_t ulCurrentSensor = ulSensorKicks;
-        uint32_t ulCurrentTelemetry = ulTelemetryKicks;
+        safe_printf("[MED]  Running (no lock needed)\r\n");
+        prvBusyWork(3000000);
+        safe_printf("[MED]  Done\r\n");
+    }
+}
 
-        /* Check all tasks before halting so every failure is reported */
-        BaseType_t xAllOk = pdTRUE;
-        if (ulCurrentSensor == ulLastSensorKicks) {
-            safe_printf("[WATCHDOG] ALERT: Sensor task not responding!\r\n");
-            xAllOk = pdFALSE;
-        }
-        if (ulCurrentTelemetry == ulLastTelemetryKicks) {
-            safe_printf("[WATCHDOG] ALERT: Telemetry task not responding!\r\n");
-            xAllOk = pdFALSE;
-        }
-        if (xAllOk == pdFALSE) {
-            safe_printf("[WATCHDOG] System would reset on real hardware.\r\n");
-            safe_printf("[WATCHDOG] Halted. Awaiting reset.\r\n");
-            /* Halt — this starves all lower-priority tasks intentionally.
-             * On real hardware a reset would follow immediately. */
+/*-----------------------------------------------------------*/
+
+/*
+ * HIGH priority task: needs the shared lock to do its work.
+ * If LOW holds the lock and MEDIUM preempts LOW, HIGH is stuck.
+ */
+static void prvHighTask(void *pvParameters)
+{
+    (void)pvParameters;
+    uint32_t ulCycle = 0;
+
+    for (;;) {
+        vTaskDelay(pdMS_TO_TICKS(300));
+
+        safe_printf("[HIGH] Acquiring lock...\r\n");
+        TickType_t xStart = xTaskGetTickCount();
+        xSemaphoreTake(xSharedLock, portMAX_DELAY);
+        TickType_t xWait = xTaskGetTickCount() - xStart;
+
+        safe_printf("[HIGH] Lock acquired (waited %u ticks)\r\n",
+                    (unsigned)xWait);
+
+        /* Do quick work with the shared resource */
+        prvBusyWork(100000);
+
+        xSemaphoreGive(xSharedLock);
+        safe_printf("[HIGH] Released lock\r\n");
+
+        ulCycle++;
+        if (ulCycle >= 3) {
+            safe_printf("\r\n[HIGH] === Demo complete after 3 cycles ===\r\n");
+#if USE_MUTEX_FIX
+            safe_printf("[HIGH] Priority inheritance was ENABLED (mutex)\r\n");
+            safe_printf("[HIGH] HIGH waited minimal ticks — MEDIUM could not block LOW\r\n");
+#else
+            safe_printf("[HIGH] Priority inheritance was DISABLED (binary semaphore)\r\n");
+            safe_printf("[HIGH] HIGH waited many ticks — MEDIUM preempted LOW\r\n");
+#endif
+            safe_printf("[HIGH] Done.\r\n");
+            /* Halt — on real hardware a reset would follow */
+            portDISABLE_INTERRUPTS();
             for (;;);
         }
-
-        safe_printf("[WATCHDOG] All tasks healthy (sensor +%u, telemetry +%u)\r\n",
-                    (unsigned)(ulCurrentSensor - ulLastSensorKicks),
-                    (unsigned)(ulCurrentTelemetry - ulLastTelemetryKicks));
-
-        /* Save for next comparison */
-        ulLastSensorKicks = ulCurrentSensor;
-        ulLastTelemetryKicks = ulCurrentTelemetry;
     }
 }
 
@@ -216,26 +176,43 @@ int main(void)
     prvUARTInit();
 
     /* Raw printf — mutex not yet created, scheduler not running */
-    printf("FreeRTOS Watchdog Timer Demo\r\n");
-    printf("============================\r\n");
+    printf("FreeRTOS Priority Inversion Demo\r\n");
+    printf("================================\r\n");
+#if USE_MUTEX_FIX
+    printf("Mode: MUTEX (priority inheritance enabled)\r\n\r\n");
+#else
+    printf("Mode: BINARY SEMAPHORE (no priority inheritance)\r\n\r\n");
+#endif
 
     xPrintMutex = xSemaphoreCreateMutex();
     configASSERT(xPrintMutex != NULL);
 
-    xSensorQueue = xQueueCreate(QUEUE_LENGTH, sizeof(SensorReading_t));
-    configASSERT(xSensorQueue != NULL);
+#if USE_MUTEX_FIX
+    /* Mutex: FreeRTOS temporarily boosts LOW to HIGH's priority
+     * when HIGH blocks on it — this prevents priority inversion */
+    xSharedLock = xSemaphoreCreateMutex();
+#else
+    /* Binary semaphore: NO priority inheritance.
+     * MEDIUM can preempt LOW while it holds the lock, blocking HIGH */
+    xSharedLock = xSemaphoreCreateBinary();
+#endif
+    configASSERT(xSharedLock != NULL);
+#if !USE_MUTEX_FIX
+    BaseType_t xGiven = xSemaphoreGive(xSharedLock);  /* Start in "available" state */
+    configASSERT(xGiven == pdPASS);
+#endif
 
     BaseType_t xResult;
-    xResult = xTaskCreate(prvSensorTask, "Sensor", configMINIMAL_STACK_SIZE * 4,
-                          NULL, SENSOR_TASK_PRIORITY, NULL);
+    xResult = xTaskCreate(prvLowTask, "Low", configMINIMAL_STACK_SIZE * 4,
+                          NULL, LOW_PRIORITY, NULL);
     configASSERT(xResult == pdPASS);
 
-    xResult = xTaskCreate(prvTelemetryTask, "Telemetry", configMINIMAL_STACK_SIZE * 4,
-                          NULL, TELEMETRY_TASK_PRIORITY, NULL);
+    xResult = xTaskCreate(prvMediumTask, "Medium", configMINIMAL_STACK_SIZE * 4,
+                          NULL, MEDIUM_PRIORITY, NULL);
     configASSERT(xResult == pdPASS);
 
-    xResult = xTaskCreate(prvWatchdogTask, "Watchdog", configMINIMAL_STACK_SIZE * 4,
-                          NULL, WATCHDOG_TASK_PRIORITY, NULL);
+    xResult = xTaskCreate(prvHighTask, "High", configMINIMAL_STACK_SIZE * 4,
+                          NULL, HIGH_PRIORITY, NULL);
     configASSERT(xResult == pdPASS);
 
     vTaskStartScheduler();
@@ -272,6 +249,7 @@ void vAssertCalled(const char *pcFileName, uint32_t ulLine)
     for (;;);
 }
 
+/* Required when configSUPPORT_STATIC_ALLOCATION is 1 */
 void vApplicationGetIdleTaskMemory(StaticTask_t **ppxIdleTaskTCBBuffer,
                                    StackType_t **ppxIdleTaskStackBuffer,
                                    configSTACK_DEPTH_TYPE *pulIdleTaskStackSize)
