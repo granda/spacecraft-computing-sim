@@ -1,20 +1,20 @@
-name: "Build: Phase 2"
+name: "Build: FreeRTOS"
 
 on:
   push:
     branches: [main]
     paths:
-      - phase2/**
+      - freertos/**
       - .github/actions/install-toolchain/**
-      - .github/workflows/build-phase2.yml
+      - .github/workflows/build-freertos.yml
   pull_request:
     paths:
-      - phase2/**
+      - freertos/**
       - .github/actions/install-toolchain/**
-      - .github/workflows/build-phase2.yml
+      - .github/workflows/build-freertos.yml
 
 jobs:
-  phase2:
+  freertos:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -23,5 +23,5 @@ jobs:
           submodules: recursive
           fetch-depth: 1
       - uses: ./.github/actions/install-toolchain
-      - name: Build and test phase2
-        run: make -C phase2 test
+      - name: Build and test freertos
+        run: make -C freertos test

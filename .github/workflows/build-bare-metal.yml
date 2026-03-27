@@ -1,20 +1,20 @@
-name: "Build: Phase 1"
+name: "Build: Bare Metal"
 
 on:
   push:
     branches: [main]
     paths:
-      - phase1/**
+      - bare-metal/**
       - .github/actions/install-toolchain/**
-      - .github/workflows/build-phase1.yml
+      - .github/workflows/build-bare-metal.yml
   pull_request:
     paths:
-      - phase1/**
+      - bare-metal/**
       - .github/actions/install-toolchain/**
-      - .github/workflows/build-phase1.yml
+      - .github/workflows/build-bare-metal.yml
 
 jobs:
-  phase1:
+  bare-metal:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -23,5 +23,5 @@ jobs:
           submodules: recursive
           fetch-depth: 1
       - uses: ./.github/actions/install-toolchain
-      - name: Build and test phase1
-        run: make -C phase1 test
+      - name: Build and test bare-metal
+        run: make -C bare-metal test

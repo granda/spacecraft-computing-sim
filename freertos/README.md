@@ -1,4 +1,4 @@
-# Phase 2: FreeRTOS on QEMU
+# FreeRTOS on QEMU
 
 A sensor-to-telemetry pipeline with priority-based scheduling on QEMU MPS2-AN385 (Cortex-M3) — four FreeRTOS tasks modeling how a real spacecraft processes sensor data.
 
@@ -27,8 +27,8 @@ git clone --recurse-submodules https://github.com/granda/spacecraft-sim.git
 git submodule update --init --recursive
 
 # Build and run
-make -C phase2 run    # Ctrl-A, X to exit QEMU
-make -C phase2 test   # 7 integration tests
+make -C freertos run    # Ctrl-A, X to exit QEMU
+make -C freertos test   # 7 integration tests
 ```
 
 ## Output

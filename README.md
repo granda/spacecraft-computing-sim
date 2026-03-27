@@ -6,17 +6,16 @@ No physical hardware required.
 
 ## Roadmap
 
-### Phase 1: Bare-Metal C in QEMU — COMPLETE
+### Bare Metal
 
 Set up an ARM cross-compilation environment and write bare-metal C targeting an emulated Cortex-M3 (MPS2-AN385). Software talks directly to hardware registers without an OS.
 
 - [x] UART output via memory-mapped I/O
 - [x] Interrupt handlers (SysTick timer)
-- [ ] GPIO simulation
 
-[Phase 1 code and docs](phase1/)
+[Code and docs](bare-metal/)
 
-### Phase 2: FreeRTOS on QEMU
+### FreeRTOS
 
 Clone FreeRTOS and run it on the same QEMU Cortex-M3 target. Learn RTOS fundamentals through progressive exercises.
 
@@ -26,7 +25,7 @@ Clone FreeRTOS and run it on the same QEMU Cortex-M3 target. Learn RTOS fundamen
 - [x] Sensor-reading pipeline with priority-based scheduling
 - [x] Trigger and resolve a priority inversion scenario
 
-### Phase 3: ION DTN on Linux
+### DTN (Delay-Tolerant Networking)
 
 Build NASA JPL's delay-tolerant networking stack and simulate space-like network conditions.
 
@@ -36,7 +35,7 @@ Build NASA JPL's delay-tolerant networking stack and simulate space-like network
 - [ ] File transfer using CFDP
 - [ ] Contact-graph routing with scheduled link windows
 
-### Phase 4: Connect the Two Worlds
+### Integration
 
 FreeRTOS "spacecraft" sends telemetry over DTN to a "ground station" — a miniature version of real mission architecture.
 
@@ -45,18 +44,19 @@ FreeRTOS "spacecraft" sends telemetry over DTN to a "ground station" — a minia
 - [ ] UART bridge: telemetry flows from QEMU to ION via host script
 - [ ] Artificial Mars-distance delays on the virtual network
 
-### Phase 5: Blog About It
+### Blog
 
-- [ ] Document each phase on Hugo blog
+- [ ] Document each module on Hugo blog
 - [ ] Angle: "Building a spacecraft computer simulator at home with Claude Code"
 
 ## Quick Start
 
 ```bash
 sudo apt install gcc-arm-none-eabi qemu-system-arm build-essential
-make -C phase1 run    # bare-metal: build and run in QEMU (Ctrl-A, X to exit)
-make -C phase2 run    # FreeRTOS: sensor pipeline demo
-make -C phase2 test   # run integration tests (7 assertions)
+make -C bare-metal run  # bare-metal: build and run in QEMU (Ctrl-A, X to exit)
+make -C freertos run    # FreeRTOS: sensor pipeline demo
+make -C freertos test   # run integration tests (7 assertions)
+make -C dtn test        # DTN: build ION, run two-node network, 6 tests
 ```
 
 ## Key Concepts

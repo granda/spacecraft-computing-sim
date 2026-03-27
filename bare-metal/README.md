@@ -1,4 +1,4 @@
-# Phase 1: Bare-Metal C in QEMU
+# Bare Metal: C on QEMU
 
 ## Quick Start
 

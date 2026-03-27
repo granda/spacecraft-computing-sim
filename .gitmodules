@@ -1,3 +1,3 @@
-[submodule "phase2/freertos-kernel"]
-	path = phase2/freertos-kernel
+[submodule "freertos/freertos-kernel"]
+	path = freertos/freertos-kernel
 	url = https://github.com/FreeRTOS/FreeRTOS-Kernel.git
