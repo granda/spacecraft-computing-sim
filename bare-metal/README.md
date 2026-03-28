@@ -19,8 +19,16 @@ make test   # run integration tests
 ### Expected Output
 
 ```
-Hello from bare-metal Cortex-M3!
-No OS. No standard library. Just registers.
+SysTick interrupt demo
+======================
+Ticking at 2 Hz for 5 seconds (10 ticks)...
+
+  tick 1
+  tick 2
+  # (ticks 3-9 omitted)
+  tick 10
+
+Done — 5 seconds counted by interrupt.
 ```
 
 ## Project Structure
@@ -31,6 +39,10 @@ main.c      — CMSDK UART0 driver and application entry point
 mps2.ld     — Linker script (flash at 0x0, RAM at 0x20000000)
 Makefile    — Build, run, and test targets
 ```
+
+## Diagrams
+
+- [Boot Flow](docs/boot-flow.md) — how the CPU gets from power-on to `main()`
 
 ## How It Works
 
