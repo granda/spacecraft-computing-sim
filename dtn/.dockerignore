@@ -1,6 +1,7 @@
 # Exclude files not needed in the image — configs/ is volume-mounted at runtime,
 # and scripts/ionstart.sh is the only script COPYed into the image.
 configs/
-scripts/test.py
+scripts/test_basic.py
+scripts/test_degraded.py
 README.md
 Makefile

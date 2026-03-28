@@ -85,7 +85,8 @@ configs/
   node2/node.rc     - Same structure, different node ID and routing
 scripts/
   ionstart.sh       - Container entrypoint: starts ION daemons via ionstart
-  test.py           - Integration tests (ION status, bping, bpsendfile/bprecvfile)
+  test_basic.py     - Integration tests (ION status, bping, bpsendfile/bprecvfile)
+  test_degraded.py  - Degraded-link tests (latency, packet loss, intermittent)
 Makefile            - build, run, test, clean targets
 ```
 

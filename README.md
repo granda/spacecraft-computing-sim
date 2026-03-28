@@ -30,8 +30,8 @@ Clone FreeRTOS and run it on the same QEMU Cortex-M3 target. Learn RTOS fundamen
 Build NASA JPL's delay-tolerant networking stack and simulate space-like network conditions.
 
 - [x] Two-node DTN network in Docker containers
-- [ ] Simulated degraded links with `tc netem` (latency, packet loss, intermittent connectivity)
-- [ ] Bundle transfer over degraded link
+- [x] Simulated degraded links with `tc netem` (latency, packet loss, intermittent connectivity)
+- [ ] Bundle transfer over degraded link (sustained throughput, larger payloads)
 - [ ] File transfer using CFDP
 - [ ] Contact-graph routing with scheduled link windows
 
@@ -57,6 +57,7 @@ make -C bare-metal run  # bare-metal: build and run in QEMU (Ctrl-A, X to exit)
 make -C freertos run    # FreeRTOS: sensor pipeline demo
 make -C freertos test   # run integration tests (7 assertions)
 make -C dtn test        # DTN: build ION, run two-node network, 6 tests
+make -C dtn test-degraded  # DTN: degraded links (latency, loss, intermittent), 3 tests
 ```
 
 ## Key Concepts

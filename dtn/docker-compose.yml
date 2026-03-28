@@ -1,3 +1,12 @@
+# Linux capabilities (cap_add) grant specific kernel privileges to containers
+# without running them as fully privileged. Docker drops most capabilities by
+# default; we add back only the two ION needs:
+#   IPC_OWNER  — lets ION create/attach System V shared-memory segments that
+#                its daemons use for inter-process state (SDR datastore).
+#   NET_ADMIN  — allows 'tc netem' traffic-control rules for simulating
+#                degraded space links (latency, packet loss, outages).
+#                Only node1 (spacecraft) needs it; node2 (ground) is the
+#                clean endpoint.
 services:
   node1:
     build: .
@@ -8,7 +17,7 @@ services:
       ION_CONFIG_DIR: /ion/configs
     cap_add:
       - IPC_OWNER
-      # NET_ADMIN added in degraded-links phase for tc netem
+      - NET_ADMIN
     shm_size: 128m
     healthcheck:
       test: ["CMD-SHELL", "echo v | ionadmin 2>&1 | grep -qi ion-open-source && pgrep -x bpecho > /dev/null"]
@@ -30,7 +39,6 @@ services:
       ION_CONFIG_DIR: /ion/configs
     cap_add:
       - IPC_OWNER
-      # NET_ADMIN added in degraded-links phase for tc netem
     shm_size: 128m
     # node2 waits for node1 — prevents race at LTP span setup (udplso resolves node1 hostname)
     depends_on:

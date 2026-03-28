@@ -6,7 +6,7 @@
 SHELL = /bin/bash
 COMPOSE = docker compose
 
-.PHONY: all build run test check-configs clean
+.PHONY: all build run test test-degraded check-configs clean
 
 all: build
 
@@ -23,7 +23,10 @@ check-configs:
 	@echo "  Config topology tables are in sync"
 
 test: build check-configs
-	@python3 scripts/test.py
+	@PYTHONPATH=scripts python3 scripts/test_basic.py
+
+test-degraded: build check-configs
+	@PYTHONPATH=scripts python3 scripts/test_degraded.py
 
 clean:
 	$(COMPOSE) down --rmi local --volumes --remove-orphans 2>/dev/null || true
