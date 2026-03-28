@@ -3,5 +3,6 @@
 configs/
 scripts/test_basic.py
 scripts/test_degraded.py
+scripts/test_throughput.py
 README.md
 Makefile

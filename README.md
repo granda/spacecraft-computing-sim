@@ -31,7 +31,7 @@ Build NASA JPL's delay-tolerant networking stack and simulate space-like network
 
 - [x] Two-node DTN network in Docker containers
 - [x] Simulated degraded links with `tc netem` (latency, packet loss, intermittent connectivity)
-- [ ] Bundle transfer over degraded link (sustained throughput, larger payloads)
+- [x] Bundle transfer over degraded link (sustained throughput, larger payloads)
 - [ ] File transfer using CFDP
 - [ ] Contact-graph routing with scheduled link windows
 
@@ -58,6 +58,7 @@ make -C freertos run    # FreeRTOS: sensor pipeline demo
 make -C freertos test   # run integration tests (7 assertions)
 make -C dtn test        # DTN: build ION, run two-node network, 6 tests
 make -C dtn test-degraded  # DTN: degraded links (latency, loss, intermittent), 3 tests
+make -C dtn test-throughput  # DTN: larger payloads (10-500 KB) over degraded links
 ```
 
 ## Key Concepts

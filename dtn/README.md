@@ -30,6 +30,9 @@ make -C dtn run        # Ctrl-C to stop
 # Run integration tests
 make -C dtn test
 
+# Run throughput tests (10 KB – 500 KB payloads, degraded links, ~3 min)
+make -C dtn test-throughput
+
 # Clean up containers and images
 make -C dtn clean
 
@@ -87,6 +90,7 @@ scripts/
   ionstart.sh       - Container entrypoint: starts ION daemons via ionstart
   test_basic.py     - Integration tests (ION status, bping, bpsendfile/bprecvfile)
   test_degraded.py  - Degraded-link tests (latency, packet loss, intermittent)
+  test_throughput.py - Throughput tests (larger payloads, LTP fragmentation, degraded links)
 Makefile            - build, run, test, clean targets
 ```
 
