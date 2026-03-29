@@ -20,7 +20,7 @@ services:
       - NET_ADMIN
     shm_size: 128m
     healthcheck:
-      test: ["CMD-SHELL", "echo v | ionadmin 2>&1 | grep -qi ion-open-source && pgrep -x bpecho > /dev/null"]
+      test: ["CMD-SHELL", "echo v | ionadmin 2>&1 | grep -qi ion-open-source && pgrep -x bpecho > /dev/null && pgrep -x cfdpclock > /dev/null && pgrep -x bputa > /dev/null"]
       interval: 5s
       timeout: 3s
       retries: 12
@@ -45,7 +45,7 @@ services:
       node1:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "echo v | ionadmin 2>&1 | grep -qi ion-open-source && pgrep -x bpecho > /dev/null"]
+      test: ["CMD-SHELL", "echo v | ionadmin 2>&1 | grep -qi ion-open-source && pgrep -x bpecho > /dev/null && pgrep -x cfdpclock > /dev/null && pgrep -x bputa > /dev/null"]
       interval: 5s
       timeout: 3s
       retries: 12

@@ -6,7 +6,7 @@
 SHELL = /bin/bash
 COMPOSE = docker compose
 
-.PHONY: all build run test test-degraded test-throughput check-configs clean
+.PHONY: all build run test test-degraded test-throughput test-cfdp check-configs clean
 
 all: build
 
@@ -30,6 +30,9 @@ test-degraded: build check-configs
 
 test-throughput: build check-configs
 	@PYTHONPATH=scripts python3 scripts/test_throughput.py
+
+test-cfdp: build check-configs
+	@PYTHONPATH=scripts python3 scripts/test_cfdp.py
 
 clean:
 	$(COMPOSE) down --rmi local --volumes --remove-orphans 2>/dev/null || true

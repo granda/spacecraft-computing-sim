@@ -13,8 +13,8 @@ Two-node delay-tolerant network using NASA JPL's ION stack in Docker containers.
 +------------------+                            +------------------+
 ```
 
-- **Node 1** (spacecraft): ION node ID 1, endpoints `ipn:1.0` through `ipn:1.2`
-- **Node 2** (ground station): ION node ID 2, endpoints `ipn:2.0` through `ipn:2.2`
+- **Node 1** (spacecraft): ION node ID 1, endpoints `ipn:1.0` through `ipn:1.2`, `ipn:1.64`–`ipn:1.65`
+- **Node 2** (ground station): ION node ID 2, endpoints `ipn:2.0` through `ipn:2.2`, `ipn:2.64`–`ipn:2.65`
 - **LTP** (Licklider Transmission Protocol) over UDP on Docker bridge networking (port 1113)
 - Contact window: 24 hours at 100 KB/s with 1-second one-way light time
 
@@ -32,6 +32,9 @@ make -C dtn test
 
 # Run throughput tests (10 KB – 500 KB payloads, degraded links, ~3 min)
 make -C dtn test-throughput
+
+# Run CFDP file transfer tests (1-100 KB, integrity verification)
+make -C dtn test-cfdp
 
 # Clean up containers and images
 make -C dtn clean
@@ -74,6 +77,12 @@ LTP is the convergence layer designed for deep space. Unlike TCP, LTP expects lo
 
 Real missions (Mars relay, Lunar Gateway) use LTP. STCP is simpler but hides the delay characteristics that make space networking interesting.
 
+### CFDP (File Delivery Protocol)
+
+CFDP (CCSDS File Delivery Protocol) runs on top of the Bundle Protocol and provides file-oriented transfer with metadata, checksums, and transaction tracking. Unlike raw `bpsendfile` (which sends bundles without filename preservation), CFDP is how real missions transfer files between spacecraft and ground.
+
+This setup uses **Class 1** (unacknowledged) CFDP. Reliability comes from LTP's retransmission layer beneath BP — the same way most operational missions configure it. ION's `bpcp`/`bpcpd` tools provide an scp-like interface over CFDP+BP.
+
 ### Contact-Graph Routing
 
 ION doesn't use routing tables. Instead, contacts (scheduled communication windows) are declared in advance. ION's routing engine computes the best path for each bundle based on when links are available, how much bandwidth they have, and the bundle's deadline. In this demo, a simple always-on contact is used; later exercises add realistic scheduled windows.
@@ -84,13 +93,14 @@ ION doesn't use routing tables. Instead, contacts (scheduled communication windo
 Dockerfile          - Multi-stage build: compile ION 4.1.4 from source, slim runtime
 docker-compose.yml  - Two-node network with bridge networking
 configs/
-  node1/node.rc     - Combined ION config (ionadmin, ionsecadmin, ltpadmin, bpadmin, ipnadmin)
+  node1/node.rc     - Combined ION config (ionadmin, ionsecadmin, ltpadmin, bpadmin, ipnadmin, cfdpadmin)
   node2/node.rc     - Same structure, different node ID and routing
 scripts/
   ionstart.sh       - Container entrypoint: starts ION daemons via ionstart
   test_basic.py     - Integration tests (ION status, bping, bpsendfile/bprecvfile)
   test_degraded.py  - Degraded-link tests (latency, packet loss, intermittent)
   test_throughput.py - Throughput tests (larger payloads, LTP fragmentation, degraded links)
+  test_cfdp.py      - CFDP file transfer tests (cfdptest, integrity, multiple sizes)
 Makefile            - build, run, test, clean targets
 ```
 
@@ -103,6 +113,7 @@ Makefile            - build, run, test, clean targets
 | One-way light time | 1 second | Simulates propagation delay |
 | Contact duration | 24 hours | Relative to ionadmin start; restart resets the clock |
 | Bundle Protocol | BPv7 (ION 4.1.4) | Current standard (RFC 9171) |
+| CFDP mode | Class 1 (unacknowledged) | LTP provides reliability; matches mission practice |
 | Config format | Combined `.rc` file | ION's `ionstart -I` handles ordering |
 
 > **Note:** Containers run as root because ION's shared memory requires `IPC_OWNER`.

@@ -59,6 +59,9 @@ a scheme ipn 'ipnfw' 'ipnadminep'
 a endpoint ipn:1.0 x
 a endpoint ipn:1.1 x
 a endpoint ipn:1.2 q
+# CFDP: bputa uses service 64 (send) and 65 (receive)
+a endpoint ipn:1.64 q
+a endpoint ipn:1.65 q
 
 # LTP convergence layer: max_segment_size=1400, agg_size_limit=100
 a protocol ltp 1400 100
@@ -71,3 +74,10 @@ s
 # Forwarding plan: bundles for node 2 go via ltp/2
 a plan 2 ltp/2
 ## end ipnadmin
+
+## begin cfdpadmin
+# cfdpadmin command 1: initialize CFDP entity (numeric verb, not a node number)
+# s <UTL_command> <local_entity_nbr>
+1
+s bputa 1
+## end cfdpadmin
