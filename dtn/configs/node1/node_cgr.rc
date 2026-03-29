@@ -1,0 +1,91 @@
+# CGR variant of node1/node.rc — scheduled contact windows instead of always-on.
+# Topology tables (contact/range) must be kept identical across all nodes.
+# Lines that differ from node2: node number (ionadmin init), span target + hostname
+# (ltpadmin), endpoint IDs (bpadmin), and forwarding plan (ipnadmin).
+## begin ionadmin
+# initialize: node_number=1, config_name (empty)
+1 1 ''
+s
+
+# Scheduled contact windows for Contact-Graph Routing demonstration.
+# ION's CGR engine computes forwarding paths from this table — bundles
+# sent during a gap are queued locally until the next window opens.
+#
+# a contact  start   stop    from  to  rate(bytes/s)
+# a range    start   stop    from  to  owlt(seconds)
+#
+# Window 1:  +60  to +90   (30s)  — first pass, 100 KB/s, 1s OWLT
+# Window 2: +150  to +210  (60s)  — second pass
+# Gaps: +0 to +60 and +90 to +150 — no link, bundles queue.
+# Gap 1 is 60s wide to give the test plenty of room to send a bundle
+# and verify queuing before Window 2 opens.
+a contact +60  +90  1 2 100000
+a contact +60  +90  2 1 100000
+a range   +60  +90  1 2 1
+a range   +60  +90  2 1 1
+
+a contact +150 +210 1 2 100000
+a contact +150 +210 2 1 100000
+a range   +150 +210 1 2 1
+a range   +150 +210 2 1 1
+
+# Self-loop contacts span the full period (local delivery always works)
+a contact +1 +210 1 1 100000
+a contact +1 +210 2 2 100000
+a range   +1 +210 1 1 0
+a range   +1 +210 2 2 0
+
+# m production/consumption: max bytes/s this node can produce/consume
+m production 100000
+m consumption 100000
+## end ionadmin
+
+## begin ionsecadmin
+1
+# e 1: enable BPSec processing (no keys/policies configured — bundles pass unsigned)
+e 1
+## end ionsecadmin
+
+## begin ltpadmin
+# initialize: max_export_sessions=100
+1 100
+
+# a span  engine_id  export_sessions  import_sessions  max_segment_size
+#          agg_size_threshold  agg_time_limit  'LSO_command'
+a span 2 100 100 1400 10000 1 'udplso node2:1113'
+
+# a seat 'LSI_command' — listen for incoming LTP segments
+a seat 'udplsi 0.0.0.0:1113'
+s
+## end ltpadmin
+
+## begin bpadmin
+1
+a scheme ipn 'ipnfw' 'ipnadminep'
+
+# Endpoints: ipn:node.service — x = discard if no listener, q = queue until claimed
+a endpoint ipn:1.0 x
+a endpoint ipn:1.1 x
+a endpoint ipn:1.2 q
+# CFDP: bputa uses service 64 (send) and 65 (receive)
+a endpoint ipn:1.64 q
+a endpoint ipn:1.65 q
+
+# LTP convergence layer: max_segment_size=1400, agg_size_limit=100
+a protocol ltp 1400 100
+a induct  ltp 1 ltpcli
+a outduct ltp 2 ltpclo
+s
+## end bpadmin
+
+## begin ipnadmin
+# Forwarding plan: bundles for node 2 go via ltp/2
+a plan 2 ltp/2
+## end ipnadmin
+
+## begin cfdpadmin
+# cfdpadmin command 1: initialize CFDP entity (numeric verb, not a node number)
+# s <UTL_command> <local_entity_nbr>
+1
+s bputa 1
+## end cfdpadmin

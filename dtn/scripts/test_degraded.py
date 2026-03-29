@@ -16,7 +16,8 @@ import sys
 import time
 
 from test_basic import (COMPOSE, run, compose_exec, poll_sleep,
-                        send_and_recv, cleanup, containers_running)
+                        send_and_recv, cleanup, containers_running,
+                        wait_for_nodes)
 
 
 def apply_netem(node, rule):
@@ -38,31 +39,6 @@ def parse_dropped(stats):
     """Extract dropped packet count from tc -s output."""
     m = re.search(r"dropped (\d+)", stats)
     return int(m.group(1)) if m else 0
-
-
-def wait_for_nodes():
-    """Block until both ION daemons report ready. Returns True on success."""
-    print("Waiting for ION daemons...")
-    ready = {"node1": False, "node2": False}
-    deadline = time.monotonic() + 90
-    attempt = 0
-    while time.monotonic() < deadline:
-        if attempt % 3 == 2 and not containers_running():
-            print("  FAIL: container(s) exited unexpectedly")
-            return False
-        for node in ready:
-            if not ready[node]:
-                output = run([*COMPOSE, "logs", node], timeout=10, quiet=True)
-                if "ION node ready" in output:
-                    ready[node] = True
-        if all(ready.values()):
-            return True
-        poll_sleep(attempt)
-        attempt += 1
-    for node, is_ready in ready.items():
-        if not is_ready:
-            print(f"  FAIL: {node} did not start in time")
-    return False
 
 
 def ltp_warmup():

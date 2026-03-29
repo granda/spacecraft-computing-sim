@@ -36,8 +36,14 @@ make -C dtn test-throughput
 # Run CFDP file transfer tests (1-100 KB, integrity verification)
 make -C dtn test-cfdp
 
+# Run CGR tests (scheduled contact windows, bundle queuing, ~3 min)
+make -C dtn test-cgr
+
 # Clean up containers and images
 make -C dtn clean
+
+# Debug a failing test (leaves containers running for inspection)
+PYTHONPATH=scripts python3 scripts/test_cgr.py --keep-on-failure
 
 # Note: if you `make run` then later `make test` without cleaning,
 # the 24-hour contact window may have expired. Run `make clean` first.
@@ -85,22 +91,28 @@ This setup uses **Class 1** (unacknowledged) CFDP. Reliability comes from LTP's 
 
 ### Contact-Graph Routing
 
-ION doesn't use routing tables. Instead, contacts (scheduled communication windows) are declared in advance. ION's routing engine computes the best path for each bundle based on when links are available, how much bandwidth they have, and the bundle's deadline. In this demo, a simple always-on contact is used; later exercises add realistic scheduled windows.
+ION doesn't use routing tables. Instead, contacts (scheduled communication windows) are declared in advance. ION's routing engine computes the best path for each bundle based on when links are available, how much bandwidth they have, and the bundle's deadline.
+
+The basic tests use a simple always-on 24-hour contact. The CGR tests (`make test-cgr`) replace this with two scheduled windows separated by gaps. During a gap, bundles are accepted by the local BP agent but queued — there's no active contact to forward them through. When the next window opens, CGR detects the opportunity and LTP transmits the queued bundles. This is exactly how real missions operate: contact windows are computed from orbital mechanics and uploaded as a contact plan.
 
 ## Project Structure
 
 ```
 Dockerfile          - Multi-stage build: compile ION 4.1.4 from source, slim runtime
 docker-compose.yml  - Two-node network with bridge networking
+docker-compose.cgr.yml - Override: selects scheduled-contact configs for CGR tests
 configs/
   node1/node.rc     - Combined ION config (ionadmin, ionsecadmin, ltpadmin, bpadmin, ipnadmin, cfdpadmin)
+  node1/node_cgr.rc - CGR variant: two scheduled contact windows instead of always-on
   node2/node.rc     - Same structure, different node ID and routing
+  node2/node_cgr.rc - CGR variant (topology tables identical to node1)
 scripts/
   ionstart.sh       - Container entrypoint: starts ION daemons via ionstart
   test_basic.py     - Integration tests (ION status, bping, bpsendfile/bprecvfile)
   test_degraded.py  - Degraded-link tests (latency, packet loss, intermittent)
   test_throughput.py - Throughput tests (larger payloads, LTP fragmentation, degraded links)
   test_cfdp.py      - CFDP file transfer tests (cfdptest, integrity, multiple sizes)
+  test_cgr.py       - CGR tests (scheduled windows, bundle queuing during gaps)
 Makefile            - build, run, test, clean targets
 ```
 

@@ -33,7 +33,7 @@ Build NASA JPL's delay-tolerant networking stack and simulate space-like network
 - [x] Simulated degraded links with `tc netem` (latency, packet loss, intermittent connectivity)
 - [x] Bundle transfer over degraded link (sustained throughput, larger payloads)
 - [x] File transfer using CFDP
-- [ ] Contact-graph routing with scheduled link windows
+- [x] Contact-graph routing with scheduled link windows
 
 ### Integration
 
@@ -60,6 +60,7 @@ make -C dtn test        # DTN: build ION, run two-node network, 6 tests
 make -C dtn test-degraded  # DTN: degraded links (latency, loss, intermittent), 3 tests
 make -C dtn test-throughput  # DTN: larger payloads (10-500 KB) over degraded links
 make -C dtn test-cfdp      # DTN: CFDP file transfer (1-100 KB, integrity checks)
+make -C dtn test-cgr       # DTN: contact-graph routing with scheduled windows (~3 min)
 ```
 
 ## Key Concepts

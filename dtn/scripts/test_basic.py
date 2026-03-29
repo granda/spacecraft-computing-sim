@@ -71,6 +71,42 @@ def containers_running():
     return len(result.stdout.strip().splitlines()) >= 2
 
 
+def wait_for_nodes(compose=None):
+    """Block until both ION daemons report ready. Returns True on success.
+
+    Args:
+        compose: docker-compose command list. Defaults to module-level COMPOSE.
+    """
+    if compose is None:
+        compose = COMPOSE
+    print("Waiting for ION daemons...")
+    ready = {"node1": False, "node2": False}
+    deadline = time.monotonic() + 90
+    attempt = 0
+    while time.monotonic() < deadline:
+        if attempt % 3 == 2:
+            result = subprocess.run(
+                [*compose, "ps", "--status", "running", "--quiet"],
+                capture_output=True, text=True, timeout=10,
+            )
+            if len(result.stdout.strip().splitlines()) < 2:
+                print("  FAIL: container(s) exited unexpectedly")
+                return False
+        for node in ready:
+            if not ready[node]:
+                output = run([*compose, "logs", node], timeout=10, quiet=True)
+                if "ION node ready" in output:
+                    ready[node] = True
+        if all(ready.values()):
+            return True
+        poll_sleep(attempt)
+        attempt += 1
+    for node, is_ready in ready.items():
+        if not is_ready:
+            print(f"  FAIL: {node} did not start in time")
+    return False
+
+
 def send_and_recv(sender, sender_eid, receiver, receiver_eid, message):
     """Send a file via bpsendfile and poll for delivery. Returns received content or None.
 

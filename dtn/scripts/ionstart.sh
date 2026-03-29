@@ -2,6 +2,7 @@
 set -euo pipefail
 
 CONFIG_DIR="${ION_CONFIG_DIR:-/ion/configs}"
+CONFIG_FILE="${ION_CONFIG_FILE:-node.rc}"
 BPECHO_PID=
 CFDPCLOCK_PID=
 BPUTA_PID=
@@ -22,8 +23,8 @@ trap cleanup SIGTERM SIGINT
 echo "Starting ION node ${ION_NODE_NUM}..."
 
 # Use combined config file with ionstart -I
-if ! ionstart -I "$CONFIG_DIR/node.rc"; then
-    echo "ionstart failed. Config: $CONFIG_DIR/node.rc"
+if ! ionstart -I "$CONFIG_DIR/$CONFIG_FILE"; then
+    echo "ionstart failed. Config: $CONFIG_DIR/$CONFIG_FILE"
     cat /ion/ion.log 2>/dev/null || true
     exit 1
 fi

@@ -1,0 +1,8 @@
+# Override for CGR tests: load scheduled-contact configs instead of always-on.
+services:
+  node1:
+    environment:
+      ION_CONFIG_FILE: node_cgr.rc
+  node2:
+    environment:
+      ION_CONFIG_FILE: node_cgr.rc
