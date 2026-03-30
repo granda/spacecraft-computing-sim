@@ -44,10 +44,12 @@ def run(cmd, timeout=30, check=False, quiet=False):
     return result.stdout
 
 
-def compose_exec(node, cmd, timeout=30, check=False):
+def compose_exec(node, cmd, timeout=30, check=False, compose=None):
     """Run a command inside a container. Returns stdout."""
+    if compose is None:
+        compose = COMPOSE
     result = subprocess.run(
-        [*COMPOSE, "exec", "-T", node, "bash", "-c", cmd],
+        [*compose, "exec", "-T", node, "bash", "-c", cmd],
         capture_output=True, text=True, timeout=timeout,
     )
     if result.returncode != 0:
@@ -62,25 +64,30 @@ def cleanup():
     subprocess.run([*COMPOSE, "down", "--timeout", "5", "--volumes"], capture_output=True, timeout=30)
 
 
-def containers_running():
-    """Check that both containers are still running (not exited/crashed)."""
+def containers_running(compose=None, expected=2):
+    """Check that at least `expected` containers are running (not exited/crashed)."""
+    if compose is None:
+        compose = COMPOSE
     result = subprocess.run(
-        [*COMPOSE, "ps", "--status", "running", "--quiet"],
+        [*compose, "ps", "--status", "running", "--quiet"],
         capture_output=True, text=True, timeout=10,
     )
-    return len(result.stdout.strip().splitlines()) >= 2
+    return len(result.stdout.strip().splitlines()) >= expected
 
 
-def wait_for_nodes(compose=None):
-    """Block until both ION daemons report ready. Returns True on success.
+def wait_for_nodes(compose=None, nodes=None):
+    """Block until all ION daemons report ready. Returns True on success.
 
     Args:
         compose: docker-compose command list. Defaults to module-level COMPOSE.
+        nodes: list of service names to wait for. Defaults to ["node1", "node2"].
     """
     if compose is None:
         compose = COMPOSE
+    if nodes is None:
+        nodes = ["node1", "node2"]
     print("Waiting for ION daemons...")
-    ready = {"node1": False, "node2": False}
+    ready = {n: False for n in nodes}
     deadline = time.monotonic() + 90
     attempt = 0
     while time.monotonic() < deadline:
@@ -89,7 +96,7 @@ def wait_for_nodes(compose=None):
                 [*compose, "ps", "--status", "running", "--quiet"],
                 capture_output=True, text=True, timeout=10,
             )
-            if len(result.stdout.strip().splitlines()) < 2:
+            if len(result.stdout.strip().splitlines()) < len(nodes):
                 print("  FAIL: container(s) exited unexpectedly")
                 return False
         for node in ready:
@@ -107,11 +114,13 @@ def wait_for_nodes(compose=None):
     return False
 
 
-def send_and_recv(sender, sender_eid, receiver, receiver_eid, message):
+def send_and_recv(sender, sender_eid, receiver, receiver_eid, message, compose=None):
     """Send a file via bpsendfile and poll for delivery. Returns received content or None.
 
     Endpoint convention: ipn:N.1 = bpecho (ping), ipn:N.2 = file transfer tests.
     """
+    if compose is None:
+        compose = COMPOSE
     safe_msg = shlex.quote(message)
     safe_sender = shlex.quote(sender_eid)
     safe_receiver = shlex.quote(receiver_eid)
@@ -130,9 +139,9 @@ def send_and_recv(sender, sender_eid, receiver, receiver_eid, message):
     # The endpoint is statically registered in node.rc, so polling bpadmin is
     # unreliable — instead we retry the full send+receive cycle.
     for attempt in range(3):
-        compose_exec(receiver, "cd /tmp && rm -f testfile1")
+        compose_exec(receiver, "cd /tmp && rm -f testfile1", compose=compose)
         recv = subprocess.Popen(
-            [*COMPOSE, "exec", "-T", receiver, "bash", "-c",
+            [*compose, "exec", "-T", receiver, "bash", "-c",
              f"cd /tmp && exec timeout 25 bprecvfile {safe_receiver} 1"],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
@@ -141,9 +150,10 @@ def send_and_recv(sender, sender_eid, receiver, receiver_eid, message):
             compose_exec(sender,
                          f"printf '%s' {safe_msg} > /tmp/msg.txt && "
                          f'bpsendfile {safe_sender} {safe_receiver} /tmp/msg.txt',
-                         check=True)
+                         check=True, compose=compose)
             for i in range(10):
-                output = compose_exec(receiver, "cat /tmp/testfile1 2>/dev/null || echo NOT_RECEIVED")
+                output = compose_exec(receiver, "cat /tmp/testfile1 2>/dev/null || echo NOT_RECEIVED",
+                                      compose=compose)
                 if message in output:
                     return message
                 poll_sleep(i)

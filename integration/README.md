@@ -43,13 +43,51 @@ Status lines are prefixed with `#` and can be ignored by downstream parsers.
 
 **Sequence wrap**: The seq field rolls from `9999` to `0000` and is indistinguishable from a firmware restart.  The bridge script (next milestone) should use the tick field (monotonically increasing) to detect restarts vs normal wraps.
 
+## DTN Ground Station
+
+Two ION DTN nodes in Docker form the communication link between the spacecraft and ground station.  The spacecraft node will receive telemetry from the UART bridge (next milestone) and forward it over a DTN link to the ground station.
+
+```
+QEMU (FreeRTOS)                    Docker (integration-net)
+┌──────────────┐      ┌──────────────────┐      ┌───────────────────┐
+│  Firmware     │      │  ION spacecraft  │      │  ION ground-station│
+│  UART output  │─ ─ ─>│  ipn:1.*         │─────>│  ipn:2.*           │
+│              │bridge │  (node 1)        │ LTP  │  (node 2)          │
+└──────────────┘(TODO) └──────────────────┘      └───────────────────┘
+```
+
+### Endpoints
+
+| Service | Spacecraft | Ground Station | Purpose |
+|---------|------------|----------------|---------|
+| 0 | ipn:1.0 | ipn:2.0 | Control (discard) |
+| 1 | ipn:1.1 | ipn:2.1 | bpecho / ping |
+| 2 | ipn:1.2 | ipn:2.2 | File transfer |
+| 3 | ipn:1.3 | ipn:2.3 | **Telemetry** |
+| 64/65 | ipn:1.64/65 | ipn:2.64/65 | CFDP |
+
+### DTN link parameters
+
+- LTP over UDP on Docker bridge network
+- 100 KB/s bandwidth, 1s one-way light time
+- 24-hour contact window (resets on container restart)
+- BPSec enabled but no keys configured — bundles pass unsigned (local testing only)
+
 ## Build and Run
 
-Depends on the `freertos/` directory for board support files and the FreeRTOS kernel submodule.
+Depends on the `freertos/` directory for board support files and the FreeRTOS kernel submodule.  Ground station requires Docker and reuses the ION image from `../dtn/`.
 
 ```bash
-make          # build firmware
-make run      # run in QEMU (Ctrl-A, X to exit)
-make test     # 15 integration assertions (15s capture)
+# Firmware
+make              # build firmware
+make run          # run in QEMU (Ctrl-A, X to exit)
+make test         # 15 firmware assertions (15s capture)
 make clean
+
+# Ground station
+make ground-station-up      # start spacecraft + ground-station containers
+make ground-station-down    # stop containers
+make test-ground-station    # 8 DTN assertions (ION health, bping, bundle delivery)
+make test-ground-station ARGS=--keep-on-failure  # leave containers up on failure
+make clean-ground-station   # tear down containers, images, volumes
 ```

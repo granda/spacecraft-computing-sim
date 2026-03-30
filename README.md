@@ -40,7 +40,7 @@ Build NASA JPL's delay-tolerant networking stack and simulate space-like network
 FreeRTOS "spacecraft" sends telemetry over DTN to a "ground station" — a miniature version of real mission architecture.
 
 - [x] FreeRTOS collects fake sensor data in QEMU
-- [ ] ION DTN node acts as ground station in Docker
+- [x] ION DTN node acts as ground station in Docker
 - [ ] UART bridge: telemetry flows from QEMU to ION via host script
 - [ ] Artificial Mars-distance delays on the virtual network
 

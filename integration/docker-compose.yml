@@ -1,0 +1,57 @@
+# Use 'make ground-station-up' / 'make test-ground-station' instead of
+# 'docker compose up' directly — the Makefile tears down stale containers
+# first to avoid 24-hour ION contact window expiry.
+services:
+  spacecraft:
+    build:
+      context: ../dtn
+      dockerfile: Dockerfile
+    hostname: spacecraft
+    restart: on-failure
+    environment:
+      ION_NODE_NUM: "1"
+      ION_CONFIG_DIR: /ion/configs
+    # TODO: add NET_ADMIN when Mars-distance delay milestone lands (tc netem)
+    cap_add:
+      - IPC_OWNER      # System V shared memory for ION SDR datastore
+    shm_size: 128m
+    healthcheck:
+      test: ["CMD-SHELL", "echo v | ionadmin 2>&1 | grep -qi ion-open-source && pgrep -x bpecho > /dev/null && pgrep -x cfdpclock > /dev/null && pgrep -x bputa > /dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    volumes:
+      - ./configs/spacecraft:/ion/configs:ro
+    networks:
+      - integration-net
+
+  ground-station:
+    build:
+      context: ../dtn
+      dockerfile: Dockerfile
+    hostname: ground-station
+    restart: on-failure
+    environment:
+      ION_NODE_NUM: "2"
+      ION_CONFIG_DIR: /ion/configs
+    cap_add:
+      - IPC_OWNER      # System V shared memory for ION SDR datastore
+    shm_size: 128m
+    depends_on:
+      spacecraft:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "echo v | ionadmin 2>&1 | grep -qi ion-open-source && pgrep -x bpecho > /dev/null && pgrep -x cfdpclock > /dev/null && pgrep -x bputa > /dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    volumes:
+      - ./configs/ground-station:/ion/configs:ro
+    networks:
+      - integration-net
+
+networks:
+  integration-net:
+    driver: bridge

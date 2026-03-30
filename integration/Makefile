@@ -1,3 +1,5 @@
+SHELL = /bin/bash
+
 CC          = arm-none-eabi-gcc
 SIZE        = arm-none-eabi-size
 QEMU        = qemu-system-arm
@@ -63,4 +65,33 @@ test: $(BUILD)/firmware.elf
 clean:
 	rm -rf $(BUILD)
 
-.PHONY: all run test clean dirs
+# --- DTN ground station ---
+COMPOSE = docker compose
+
+ground-station-up:
+	$(COMPOSE) up -d
+
+ground-station-down:
+	@$(COMPOSE) down --timeout 5 2>/dev/null || true
+
+# Topology and security tables must be identical across all nodes.
+# Divergent ionsecadmin policies can cause silent bundle rejection.
+check-dtn-configs:
+	@diff <(grep -E '^a (contact|range) ' configs/spacecraft/node.rc | sort) \
+	      <(grep -E '^a (contact|range) ' configs/ground-station/node.rc | sort) \
+	  || { echo "ERROR: topology tables differ between spacecraft and ground-station"; exit 1; }
+	@diff <(sed -n '/^## begin ionsecadmin/,/^## end ionsecadmin/p' configs/spacecraft/node.rc) \
+	      <(sed -n '/^## begin ionsecadmin/,/^## end ionsecadmin/p' configs/ground-station/node.rc) \
+	  || { echo "ERROR: ionsecadmin sections differ between spacecraft and ground-station"; exit 1; }
+	@echo "  Config topology and security tables are in sync"
+
+# Pass ARGS=--keep-on-failure to leave containers running for inspection.
+# Tear down first to guarantee fresh containers (avoids 24h contact window expiry).
+test-ground-station: check-dtn-configs ground-station-down
+	@python3 test_ground_station.py $(ARGS)
+
+clean-ground-station:
+	$(COMPOSE) down --rmi local --volumes --remove-orphans 2>/dev/null || true
+
+.PHONY: all run test clean dirs \
+       ground-station-up ground-station-down check-dtn-configs test-ground-station clean-ground-station

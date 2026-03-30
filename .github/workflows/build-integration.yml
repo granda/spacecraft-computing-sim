@@ -6,12 +6,18 @@ on:
     paths:
       - integration/**
       - freertos/**
+      - dtn/Dockerfile
+      - dtn/scripts/ionstart.sh
+      - dtn/scripts/test_basic.py
       - .github/actions/install-toolchain/**
       - .github/workflows/build-integration.yml
   pull_request:
     paths:
       - integration/**
       - freertos/**
+      - dtn/Dockerfile
+      - dtn/scripts/ionstart.sh
+      - dtn/scripts/test_basic.py
       - .github/actions/install-toolchain/**
       - .github/workflows/build-integration.yml
 
@@ -35,3 +41,28 @@ jobs:
         with:
           name: qemu-output
           path: /tmp/qemu.log
+
+  # NOTE: freertos/** in the workflow path trigger means this job also runs on
+  # firmware-only changes.  Acceptable for a learning project; split into a
+  # separate workflow if CI minutes become a concern.
+  ground-station:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+      - name: Build and test ground station
+        run: make -C integration test-ground-station
+      - name: Capture container logs for debugging
+        if: failure()
+        run: |
+          cd integration
+          docker compose logs > /tmp/ground-station.log 2>&1 || true
+          docker compose down --timeout 5 --volumes 2>/dev/null || true
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: ground-station-logs
+          path: /tmp/ground-station.log
