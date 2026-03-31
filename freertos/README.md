@@ -21,7 +21,7 @@ Shutdown uses a sentinel value in the telemetry queue so all readings are printe
 
 ```bash
 # First time: clone with submodules
-git clone --recurse-submodules https://github.com/granda/spacecraft-sim.git
+git clone --recurse-submodules https://github.com/granda/spacecraft-computing-sim.git
 
 # Or if already cloned:
 git submodule update --init --recursive

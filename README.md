@@ -27,6 +27,8 @@ Clone FreeRTOS and run it on the same QEMU Cortex-M3 target. Learn RTOS fundamen
 - [x] Sensor-reading pipeline with priority-based scheduling
 - [x] Trigger and resolve a priority inversion scenario
 
+[Code and docs](freertos/)
+
 ### DTN (Delay-Tolerant Networking)
 
 Build NASA JPL's delay-tolerant networking stack and simulate space-like network conditions.
@@ -37,6 +39,8 @@ Build NASA JPL's delay-tolerant networking stack and simulate space-like network
 - [x] File transfer using CFDP
 - [x] Contact-graph routing with scheduled link windows
 
+[Code and docs](dtn/)
+
 ### Integration
 
 FreeRTOS "spacecraft" sends telemetry over DTN to a "ground station" — a miniature version of real mission architecture.
@@ -45,6 +49,8 @@ FreeRTOS "spacecraft" sends telemetry over DTN to a "ground station" — a minia
 - [x] ION DTN node acts as ground station in Docker
 - [x] UART bridge: telemetry flows from QEMU to ION via host script
 - [x] Artificial Mars-distance delays on the virtual network
+
+[Code and docs](integration/)
 
 ## Quick Start
 
