@@ -78,9 +78,20 @@ QEMU (FreeRTOS)          Host Python           Docker (integration-net)
 ### DTN link parameters
 
 - LTP over UDP on Docker bridge network
-- 100 KB/s bandwidth, 1s one-way light time
+- 100 KB/s bandwidth, 1s one-way light time (5s in Mars-delay mode)
 - 24-hour contact window (resets on container restart)
 - BPSec enabled but no keys configured — bundles pass unsigned (local testing only)
+
+### Mars-Distance Delay Simulation
+
+Simulates realistic Mars communication delays using two synchronized mechanisms:
+
+1. **ION OWLT** (`node_delay.rc`): Range tables set 5s one-way light time so ION's contact-graph routing and LTP retransmission timers account for the delay.
+2. **tc netem** (applied at test time): `tc qdisc add dev eth0 root netem delay 5000ms` on the spacecraft container adds actual network latency to match.
+
+Both must agree — if tc netem delay is 5s but ION thinks OWLT is 1s, LTP will retransmit aggressively and waste bandwidth.
+
+Real Mars OWLT ranges from ~4 minutes (closest approach) to ~24 minutes (conjunction). The 5s test value keeps CI fast while being long enough to be unambiguously measurable.
 
 ## Build and Run
 
@@ -104,4 +115,8 @@ make clean-ground-station   # tear down containers, images, volumes
 make bridge                 # run bridge: QEMU -> DTN (Ctrl-C to stop)
 make test-bridge            # 11 assertions (QEMU -> bridge -> spacecraft -> ground station)
 make test-bridge ARGS=--keep-on-failure
+
+# Mars-delay (5s OWLT + tc netem)
+make test-mars-delay        # 7 assertions (telemetry delivery under simulated Mars delay)
+make test-mars-delay ARGS=--keep-on-failure
 ```

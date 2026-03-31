@@ -1,0 +1,14 @@
+# Override for Mars-delay tests: load 5s-OWLT configs and grant NET_ADMIN
+# for tc netem.  Base docker-compose.yml does not need NET_ADMIN.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.delay.yml up -d
+services:
+  spacecraft:
+    cap_add:
+      - NET_ADMIN      # tc netem for Mars-distance delay simulation
+    environment:
+      ION_CONFIG_FILE: node_delay.rc
+  ground-station:
+    cap_add:
+      - NET_ADMIN      # tc netem for Mars-distance delay simulation
+    environment:
+      ION_CONFIG_FILE: node_delay.rc

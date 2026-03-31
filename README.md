@@ -4,6 +4,8 @@ A hands-on learning project for spacecraft computer systems — real-time operat
 
 No physical hardware required.
 
+[Building a spacecraft computer simulator with Claude Code](https://granda.org/en/2026/03/30/building-a-spacecraft-computer-simulator-with-claude-code/)
+
 ## Roadmap
 
 ### Bare Metal
@@ -42,12 +44,7 @@ FreeRTOS "spacecraft" sends telemetry over DTN to a "ground station" — a minia
 - [x] FreeRTOS collects fake sensor data in QEMU
 - [x] ION DTN node acts as ground station in Docker
 - [x] UART bridge: telemetry flows from QEMU to ION via host script
-- [ ] Artificial Mars-distance delays on the virtual network
-
-### Blog
-
-- [ ] Document each module on Hugo blog
-- [ ] Angle: "Building a spacecraft computer simulator at home with Claude Code"
+- [x] Artificial Mars-distance delays on the virtual network
 
 ## Quick Start
 
@@ -64,6 +61,7 @@ make -C dtn test-cgr       # DTN: contact-graph routing with scheduled windows (
 make -C integration run    # integration: continuous telemetry in QEMU (Ctrl-A, X to exit)
 make -C integration test   # run integration tests (15 assertions)
 make -C integration test-bridge  # UART bridge: QEMU -> DTN ground station (11 assertions)
+make -C integration test-mars-delay  # Mars delay: 5s OWLT + tc netem (7 assertions)
 ```
 
 ## Key Concepts

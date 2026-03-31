@@ -11,7 +11,6 @@ services:
     environment:
       ION_NODE_NUM: "1"
       ION_CONFIG_DIR: /ion/configs
-    # TODO: add NET_ADMIN when Mars-distance delay milestone lands (tc netem)
     cap_add:
       - IPC_OWNER      # System V shared memory for ION SDR datastore
     shm_size: 128m

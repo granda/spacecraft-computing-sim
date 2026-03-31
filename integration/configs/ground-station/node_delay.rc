@@ -1,0 +1,86 @@
+# Mars-delay test config — 5s OWLT instead of 1s.  Used by test_mars_delay.py.
+# Mirror of spacecraft/node_delay.rc — topology tables (contact/range) must be kept identical.
+# Lines that differ: node number (ionadmin init), span target + hostname (ltpadmin),
+# endpoint IDs (bpadmin), forwarding plan (ipnadmin), and CFDP entity number (cfdpadmin).
+## begin ionadmin
+# initialize: node_number=2, config_name (empty)
+1 2 ''
+s
+
+# Each node needs the full network topology — ION's contact-graph
+# routing uses this to compute forwarding paths for every bundle.
+# NOTE: contact/range tables must be identical across all nodes.
+#
+# a contact  start   stop    from  to  rate(bytes/s)
+# a range    start   stop    from  to  owlt(seconds)
+#
+# 24-hour window, 100 KB/s, 5s one-way light time (Mars-delay test mode)
+# Offsets are relative to ionadmin start — restarting the container resets the clock.
+# If reusing containers without restart, window may expire and bundles queue silently.
+a contact +1 +86400 1 2 100000
+a contact +1 +86400 2 1 100000
+a range   +1 +86400 1 2 5
+a range   +1 +86400 2 1 5
+
+# Self-loop contacts required by ION for local bundle delivery
+a contact +1 +86400 1 1 100000
+a contact +1 +86400 2 2 100000
+a range   +1 +86400 1 1 0
+a range   +1 +86400 2 2 0
+
+# m production/consumption: max bytes/s this node can produce/consume
+m production 100000
+m consumption 100000
+## end ionadmin
+
+## begin ionsecadmin
+1
+# e 1: enable BPSec processing (no keys/policies configured — bundles pass unsigned)
+e 1
+## end ionsecadmin
+
+## begin ltpadmin
+# initialize: max_export_sessions=100
+1 100
+
+# a span  engine_id  export_sessions  import_sessions  max_segment_size
+#          agg_size_threshold  agg_time_limit  'LSO_command'
+a span 1 100 100 1400 10000 1 'udplso spacecraft:1113'
+
+# a seat 'LSI_command' — listen for incoming LTP segments
+a seat 'udplsi 0.0.0.0:1113'
+s
+## end ltpadmin
+
+## begin bpadmin
+1
+a scheme ipn 'ipnfw' 'ipnadminep'
+
+# Endpoints: ipn:node.service — x = discard if no listener, q = queue until claimed
+a endpoint ipn:2.0 x
+a endpoint ipn:2.1 x
+a endpoint ipn:2.2 q
+# Telemetry: ground station receives spacecraft telemetry bundles here
+a endpoint ipn:2.3 q
+# CFDP: bputa uses service 64 (send) and 65 (receive)
+a endpoint ipn:2.64 q
+a endpoint ipn:2.65 q
+
+# LTP convergence layer: max_segment_size=1400, agg_size_limit=100
+a protocol ltp 1400 100
+a induct  ltp 2 ltpcli
+a outduct ltp 1 ltpclo
+s
+## end bpadmin
+
+## begin ipnadmin
+# Forwarding plan: bundles for node 1 go via ltp/1
+a plan 1 ltp/1
+## end ipnadmin
+
+## begin cfdpadmin
+# cfdpadmin command 1: initialize CFDP entity (numeric verb, not a node number)
+# s <UTL_command> <local_entity_nbr>
+1
+s bputa 2
+## end cfdpadmin

@@ -103,6 +103,23 @@ bridge: $(BUILD)/firmware.elf ground-station-up
 test-bridge: check-dtn-configs ground-station-down $(BUILD)/firmware.elf
 	@python3 test_uart_bridge.py $(ARGS)
 
+# --- Mars-delay tests ---
+
+# Topology and security tables must be identical across delay configs too.
+check-delay-configs:
+	@diff <(grep -E '^a (contact|range) ' configs/spacecraft/node_delay.rc | sort) \
+	      <(grep -E '^a (contact|range) ' configs/ground-station/node_delay.rc | sort) \
+	  || { echo "ERROR: delay topology tables differ between spacecraft and ground-station"; exit 1; }
+	@diff <(sed -n '/^## begin ionsecadmin/,/^## end ionsecadmin/p' configs/spacecraft/node_delay.rc) \
+	      <(sed -n '/^## begin ionsecadmin/,/^## end ionsecadmin/p' configs/ground-station/node_delay.rc) \
+	  || { echo "ERROR: delay ionsecadmin sections differ between spacecraft and ground-station"; exit 1; }
+	@echo "  Delay config topology and security tables are in sync"
+
+# End-to-end test with simulated Mars-distance delay (5s OWLT + tc netem).
+test-mars-delay: check-delay-configs ground-station-down $(BUILD)/firmware.elf
+	@python3 test_mars_delay.py $(ARGS)
+
 .PHONY: all run test clean dirs \
        ground-station-up ground-station-down check-dtn-configs test-ground-station clean-ground-station \
-       bridge test-bridge
+       bridge test-bridge \
+       check-delay-configs test-mars-delay

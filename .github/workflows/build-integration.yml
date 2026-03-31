@@ -42,6 +42,31 @@ jobs:
           name: qemu-output
           path: /tmp/qemu.log
 
+  mars-delay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+      - uses: ./.github/actions/install-toolchain
+      - name: Build firmware
+        run: make -C integration build/firmware.elf
+      - name: Test Mars-distance delays
+        run: make -C integration test-mars-delay
+      - name: Capture container logs for debugging
+        if: failure()
+        run: |
+          cd integration
+          docker compose -f docker-compose.yml -f docker-compose.delay.yml logs > /tmp/mars-delay.log 2>&1 || true
+          docker compose -f docker-compose.yml -f docker-compose.delay.yml down --timeout 5 --volumes 2>/dev/null || true
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: mars-delay-logs
+          path: /tmp/mars-delay.log
+
   # NOTE: freertos/** in the workflow path trigger means this job also runs on
   # firmware-only changes.  Acceptable for a learning project; split into a
   # separate workflow if CI minutes become a concern.
