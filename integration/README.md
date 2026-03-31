@@ -41,20 +41,29 @@ $TELEM,0004,SUN,850,1500
 
 Status lines are prefixed with `#` and can be ignored by downstream parsers.
 
-**Sequence wrap**: The seq field rolls from `9999` to `0000` and is indistinguishable from a firmware restart.  The bridge script (next milestone) should use the tick field (monotonically increasing) to detect restarts vs normal wraps.
+**Sequence wrap**: The seq field rolls from `9999` to `0000` and is indistinguishable from a firmware restart.  A future enhancement could use the tick field (monotonically increasing) to detect restarts vs normal wraps — not implemented in the current bridge since the bridge manages the QEMU lifecycle directly.
 
 ## DTN Ground Station
 
-Two ION DTN nodes in Docker form the communication link between the spacecraft and ground station.  The spacecraft node will receive telemetry from the UART bridge (next milestone) and forward it over a DTN link to the ground station.
+Two ION DTN nodes in Docker form the communication link between the spacecraft and ground station.  The spacecraft node receives telemetry from the UART bridge and forwards it over a DTN link to the ground station.
 
 ```
-QEMU (FreeRTOS)                    Docker (integration-net)
-┌──────────────┐      ┌──────────────────┐      ┌───────────────────┐
-│  Firmware     │      │  ION spacecraft  │      │  ION ground-station│
-│  UART output  │─ ─ ─>│  ipn:1.*         │─────>│  ipn:2.*           │
-│              │bridge │  (node 1)        │ LTP  │  (node 2)          │
-└──────────────┘(TODO) └──────────────────┘      └───────────────────┘
+QEMU (FreeRTOS)          Host Python           Docker (integration-net)
+┌──────────────┐    ┌──────────────────┐    ┌────────────┐    ┌─────────────────┐
+│ firmware.elf │    │  uart_bridge.py  │    │ spacecraft │    │ ground-station  │
+│ UART output  │───>│  TCP :4321       │───>│ ipn:1.3    │───>│ ipn:2.3         │
+│              │sock│  batch + inject  │exec│            │LTP │                 │
+└──────────────┘    └──────────────────┘    └────────────┘    └─────────────────┘
 ```
+
+### UART Bridge
+
+`uart_bridge.py` runs on the host and connects the two subsystems:
+
+1. Launches QEMU with UART redirected to a TCP socket (`-chardev socket,server=on,wait=off`)
+2. Connects to the socket and reads telemetry lines (filters for `$TELEM,*`)
+3. Batches lines (2s interval or 30-line cap) and injects each batch as a DTN bundle via `docker compose exec` into the spacecraft container (`ipn:1.3` -> `ipn:2.3`)
+4. Ground station receives bundles over LTP
 
 ### Endpoints
 
@@ -90,4 +99,9 @@ make ground-station-down    # stop containers
 make test-ground-station    # 8 DTN assertions (ION health, bping, bundle delivery)
 make test-ground-station ARGS=--keep-on-failure  # leave containers up on failure
 make clean-ground-station   # tear down containers, images, volumes
+
+# UART bridge (end-to-end)
+make bridge                 # run bridge: QEMU -> DTN (Ctrl-C to stop)
+make test-bridge            # 11 assertions (QEMU -> bridge -> spacecraft -> ground station)
+make test-bridge ARGS=--keep-on-failure
 ```

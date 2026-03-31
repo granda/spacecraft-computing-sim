@@ -41,7 +41,7 @@ FreeRTOS "spacecraft" sends telemetry over DTN to a "ground station" — a minia
 
 - [x] FreeRTOS collects fake sensor data in QEMU
 - [x] ION DTN node acts as ground station in Docker
-- [ ] UART bridge: telemetry flows from QEMU to ION via host script
+- [x] UART bridge: telemetry flows from QEMU to ION via host script
 - [ ] Artificial Mars-distance delays on the virtual network
 
 ### Blog
@@ -63,6 +63,7 @@ make -C dtn test-cfdp      # DTN: CFDP file transfer (1-100 KB, integrity checks
 make -C dtn test-cgr       # DTN: contact-graph routing with scheduled windows (~3 min)
 make -C integration run    # integration: continuous telemetry in QEMU (Ctrl-A, X to exit)
 make -C integration test   # run integration tests (15 assertions)
+make -C integration test-bridge  # UART bridge: QEMU -> DTN ground station (11 assertions)
 ```
 
 ## Key Concepts

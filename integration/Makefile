@@ -93,5 +93,16 @@ test-ground-station: check-dtn-configs ground-station-down
 clean-ground-station:
 	$(COMPOSE) down --rmi local --volumes --remove-orphans 2>/dev/null || true
 
+# --- UART bridge ---
+
+# Run the bridge (builds firmware, starts DTN containers, then bridges).
+bridge: $(BUILD)/firmware.elf ground-station-up
+	@python3 uart_bridge.py --kernel $(BUILD)/firmware.elf
+
+# End-to-end test: QEMU -> bridge -> spacecraft -> ground station.
+test-bridge: check-dtn-configs ground-station-down $(BUILD)/firmware.elf
+	@python3 test_uart_bridge.py $(ARGS)
+
 .PHONY: all run test clean dirs \
-       ground-station-up ground-station-down check-dtn-configs test-ground-station clean-ground-station
+       ground-station-up ground-station-down check-dtn-configs test-ground-station clean-ground-station \
+       bridge test-bridge
