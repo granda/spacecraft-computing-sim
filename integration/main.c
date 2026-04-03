@@ -30,6 +30,38 @@
 #include "board.h"
 #include "telemetry.h"
 
+/* ARM Cortex-M SysTick Current Value Register */
+#define SYST_CVR (*((volatile uint32_t *)0xE000E018u))
+
+/* Xorshift32 PRNG (Marsaglia 2003, shifts 13/17/5).  No malloc, no
+ * stdlib.  A tick interrupt can preempt between the read and write of
+ * ulPrngState, letting two tasks see the same state.  We use a brief
+ * critical section to prevent this.  Must only be called from task
+ * context (not ISRs) because taskENTER_CRITICAL uses BASEPRI masking.
+ * The configASSERT guards are compiled out in release builds, so the
+ * restriction is enforced by convention in production.
+ *
+ * Callers use prvRand() % N where N is small (50-500).  This has
+ * negligible modulo bias (< 0.002%) since N << 2^32.  Do not use
+ * this pattern if N approaches 2^31 without switching to rejection
+ * sampling. */
+static uint32_t ulPrngState = 1u;  /* seeded in main() */
+
+static uint32_t prvRand(void)
+{
+    uint32_t x;
+    configASSERT(xTaskGetSchedulerState() != taskSCHEDULER_NOT_STARTED);
+    configASSERT(xPortIsInsideInterrupt() == pdFALSE);
+    taskENTER_CRITICAL();
+    x = ulPrngState;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    ulPrngState = x;
+    taskEXIT_CRITICAL();
+    return x;
+}
+
 /* Queues */
 static QueueHandle_t xRawQueue = NULL;       /* sensors -> processor */
 static QueueHandle_t xTelemetryQueue = NULL; /* processor -> telemetry */
@@ -114,7 +146,7 @@ static void prvTempSensorTask(void *pvParameters)
         }
 
         xReading.sensor_id = SENSOR_TEMP;
-        xReading.raw_value = 2000 + (xLastWakeTime % 500);  /* centidegrees */
+        xReading.raw_value = 2000 + (prvRand() % 500);  /* centidegrees */
         xReading.timestamp = xLastWakeTime;
 
         if (xQueueSend(xRawQueue, &xReading, 0) != pdPASS) {
@@ -144,7 +176,7 @@ static void prvGyroSensorTask(void *pvParameters)
         }
 
         xReading.sensor_id = SENSOR_GYRO;
-        xReading.raw_value = 150 + (xLastWakeTime % 50);  /* millideg/s */
+        xReading.raw_value = 150 + (prvRand() % 50);  /* millideg/s */
         xReading.timestamp = xLastWakeTime;
 
         if (xQueueSend(xRawQueue, &xReading, 0) != pdPASS) {
@@ -174,7 +206,7 @@ static void prvBattSensorTask(void *pvParameters)
         }
 
         xReading.sensor_id = SENSOR_BATT;
-        xReading.raw_value = 2800 + (xLastWakeTime % 50);  /* millivolts */
+        xReading.raw_value = 2800 + (prvRand() % 50);  /* millivolts */
         xReading.timestamp = xLastWakeTime;
 
         if (xQueueSend(xRawQueue, &xReading, 0) != pdPASS) {
@@ -206,7 +238,7 @@ static void prvSunSensorTask(void *pvParameters)
         }
 
         xReading.sensor_id = SENSOR_SUN;
-        xReading.raw_value = 800 + (xLastWakeTime % 100);  /* milliamps */
+        xReading.raw_value = 800 + (prvRand() % 100);  /* milliamps */
         xReading.timestamp = xLastWakeTime;
 
         if (xQueueSend(xRawQueue, &xReading, 0) != pdPASS) {
@@ -331,6 +363,14 @@ static void prvTelemetryTask(void *pvParameters)
 int main(void)
 {
     prvUARTInit();
+
+    /* QEMU: SYST_CVR is always 0 here (SysTick not running pre-scheduler),
+     * so the effective seed is always 1.  Every QEMU run produces the
+     * same deterministic sequence, which is fine for simulated sensors.
+     * Real hardware: SysTick free-runs and provides modest entropy.
+     * For stronger seeding on real hardware, XOR in an ADC noise sample
+     * or the MCU unique ID register. */
+    ulPrngState = SYST_CVR | 1u;
 
     /* Raw printf — mutex not yet created, scheduler not running */
     printf("# Spacecraft Telemetry Firmware v1.0\r\n");
